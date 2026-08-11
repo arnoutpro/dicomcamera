@@ -12,6 +12,7 @@
 *.aab
 *.ap_
 *.dex
+!dist/*.apk
 .kotlin/
 lab/orthanc-storage/
 lab/orthanc-db/

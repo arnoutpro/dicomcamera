@@ -45,6 +45,7 @@ fun WorklistScreen(
     node: DicomNode,
     callingAeTitle: String,
     onSelected: (WorklistEntry) -> Unit,
+    embedded: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var patientId by remember { mutableStateOf("") }
@@ -54,19 +55,15 @@ fun WorklistScreen(
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        ScreenTitle(
-            title = "Modality worklist",
-            subtitle = "Select a scheduled XC exam to bind this capture session.",
-        )
-        SoftPanel {
-            SectionLabel("Filters")
+    val body: @Composable () -> Unit = {
+        if (!embedded) {
+            ScreenTitle(
+                title = "Modality worklist",
+                subtitle = "Select a scheduled XC exam to bind this capture session.",
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (!embedded) SectionLabel("Filters")
             DicomTextField(
                 value = patientId,
                 onValueChange = { patientId = it },
@@ -117,15 +114,13 @@ fun WorklistScreen(
         }
 
         if (loading) {
-            SoftPanel {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CircularProgressIndicator(color = DicomColors.Forest)
-                    Text("Querying modality worklist…", style = MaterialTheme.typography.bodySmall)
-                }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CircularProgressIndicator(color = DicomColors.Forest)
+                Text("Querying modality worklist…", style = MaterialTheme.typography.bodySmall)
             }
         } else {
             StatusBanner(
@@ -148,6 +143,20 @@ fun WorklistScreen(
                     MetaChip(text = "Select", foreground = DicomColors.ForestMid)
                 },
             )
+        }
+    }
+
+    if (embedded) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = { body() })
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            SoftPanel { body() }
         }
     }
 }
@@ -173,7 +182,7 @@ fun AppendStudyScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         ScreenTitle(
-            title = "Append to study",
+            title = "Archive",
             subtitle = "Find an existing study, then add clinical photo/video to it.",
         )
         SoftPanel {

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,7 +38,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -81,9 +81,11 @@ import nl.dicomcamera.app.session.SessionItemStatus
 import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.settings.SettingsRepository
 import nl.dicomcamera.app.ui.components.BrandWordmark
+import nl.dicomcamera.app.ui.components.ChromeBottomBar
 import nl.dicomcamera.app.ui.components.ChromeTopBar
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
+import nl.dicomcamera.app.ui.components.MainTab
 import nl.dicomcamera.app.ui.components.MetaChip
 import nl.dicomcamera.app.ui.components.QuietOutlinedButton
 import nl.dicomcamera.app.ui.components.ScreenTitle
@@ -108,14 +110,29 @@ import java.io.File
 private const val TAG = "Phase3App"
 
 private enum class Destination {
-    Patient,
-    Settings,
     Worklist,
-    AppendStudy,
+    Archive,
+    Settings,
     Capture,
     Sending,
     Result,
     Pending,
+}
+
+private fun Destination.isMainTab(): Boolean =
+    this == Destination.Worklist || this == Destination.Archive || this == Destination.Settings
+
+private fun Destination.toMainTab(): MainTab = when (this) {
+    Destination.Worklist -> MainTab.Worklist
+    Destination.Archive -> MainTab.Archive
+    Destination.Settings -> MainTab.Settings
+    else -> MainTab.Worklist
+}
+
+private fun MainTab.toDestination(): Destination = when (this) {
+    MainTab.Worklist -> Destination.Worklist
+    MainTab.Archive -> Destination.Archive
+    MainTab.Settings -> Destination.Settings
 }
 
 @Composable
@@ -138,7 +155,8 @@ fun Phase3App() {
         withContext(Dispatchers.IO) { staging.purgeOrphans() }
     }
 
-    var destination by remember { mutableStateOf(Destination.Patient) }
+    var destination by remember { mutableStateOf(Destination.Worklist) }
+    var lastMainTab by remember { mutableStateOf(MainTab.Worklist) }
     var patient by remember { mutableStateOf(ManualPatientForm()) }
     var exam by remember { mutableStateOf<ExamSelection?>(null) }
     var session by remember { mutableStateOf(CaptureSession()) }
@@ -161,20 +179,25 @@ fun Phase3App() {
         )
     }
 
+    fun selectMainTab(tab: MainTab) {
+        lastMainTab = tab
+        statusNote = ""
+        destination = tab.toDestination()
+    }
+
     fun goBack() {
         destination = when (destination) {
-            Destination.Settings, Destination.Pending, Destination.Capture,
-            Destination.Worklist, Destination.AppendStudy -> Destination.Patient
-            Destination.Sending, Destination.Result -> Destination.Patient
-            Destination.Patient -> Destination.Patient
+            Destination.Capture -> lastMainTab.toDestination()
+            Destination.Sending, Destination.Result, Destination.Pending -> lastMainTab.toDestination()
+            Destination.Worklist, Destination.Archive, Destination.Settings -> destination
         }
     }
 
+    val showBottomBar = destination.isMainTab()
     val title = when (destination) {
-        Destination.Patient -> "DICOM Camera"
-        Destination.Settings -> "PACS settings"
-        Destination.Worklist -> "Modality worklist"
-        Destination.AppendStudy -> "Append to study"
+        Destination.Worklist -> "Worklist"
+        Destination.Archive -> "Archive"
+        Destination.Settings -> "Settings"
         Destination.Capture -> "Session capture"
         Destination.Sending -> "Sending"
         Destination.Result -> "Result"
@@ -183,15 +206,18 @@ fun Phase3App() {
 
     Scaffold(
         containerColor = DicomColors.Linen,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ChromeTopBar(
                 title = title,
                 subtitle = when (destination) {
-                    Destination.Patient -> "Clinical capture"
+                    Destination.Worklist -> "Modality worklist & manual"
+                    Destination.Archive -> "Find study to append"
+                    Destination.Settings -> "PACS & modality"
                     Destination.Capture -> exam?.banner
                     else -> null
                 },
-                navigationIcon = if (destination != Destination.Patient) {
+                navigationIcon = if (!destination.isMainTab()) {
                     {
                         IconButton(onClick = { goBack() }) {
                             Icon(
@@ -204,18 +230,15 @@ fun Phase3App() {
                 } else {
                     null
                 },
-                actions = {
-                    if (destination == Destination.Patient) {
-                        IconButton(onClick = { destination = Destination.Settings }) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = "Settings",
-                                tint = DicomColors.Forest,
-                            )
-                        }
-                    }
-                },
             )
+        },
+        bottomBar = {
+            if (showBottomBar) {
+                ChromeBottomBar(
+                    selected = destination.toMainTab(),
+                    onSelect = { tab -> selectMainTab(tab) },
+                )
+            }
         },
     ) { padding ->
         Box(
@@ -225,39 +248,56 @@ fun Phase3App() {
                 .background(DicomColors.Linen),
         ) {
             when (destination) {
-                Destination.Patient -> PatientScreen(
+                Destination.Worklist -> WorklistTab(
                     patient = patient,
                     onPatientChange = { patient = it },
                     pacsConfigured = pacsSettings.isConfigured(),
                     pendingCount = pendingItems.size,
                     statusNote = statusNote,
                     selectedBanner = exam?.banner,
+                    node = pacsSettings.toNode(),
+                    callingAeTitle = pacsSettings.callingAeTitle,
                     onOpenPending = {
                         refreshPending()
                         destination = Destination.Pending
                     },
-                    onOpenWorklist = {
+                    onOpenSettings = { selectMainTab(MainTab.Settings) },
+                    onWorklistSelected = { entry: WorklistEntry ->
                         if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS settings first"
-                            destination = Destination.Settings
-                        } else {
-                            destination = Destination.Worklist
+                            statusNote = "Configure PACS in Settings first"
+                            selectMainTab(MainTab.Settings)
+                            return@WorklistTab
                         }
-                    },
-                    onOpenAppend = {
-                        if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS settings first"
-                            destination = Destination.Settings
-                        } else {
-                            destination = Destination.AppendStudy
-                        }
+                        val ctx = entry.toPatientStudyContext("Clinical photo/video session").copy(
+                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
+                            laterality = patient.laterality.takeIf { it.isNotBlank() },
+                        )
+                        startNewSession(ExamSelection(ctx, ExamSource.WORKLIST))
+                        patient = ManualPatientForm(
+                            patientId = entry.patientId,
+                            patientName = entry.patientName,
+                            birthDate = entry.patientBirthDate.orEmpty(),
+                            sex = entry.patientSex.orEmpty(),
+                            accessionNumber = entry.accessionNumber.orEmpty(),
+                            studyDescription = entry.studyDescription.orEmpty(),
+                            bodyPartExamined = patient.bodyPartExamined,
+                            laterality = patient.laterality,
+                        )
+                        audit.record(
+                            "select_worklist",
+                            patientId = entry.patientId,
+                            studyUid = entry.studyInstanceUid.orEmpty(),
+                            detail = entry.accessionNumber.orEmpty(),
+                        )
+                        statusNote = ""
+                        destination = Destination.Capture
                     },
                     onContinueManual = {
                         when {
                             !patient.isValid() -> statusNote = "Patient ID and Name are required"
                             !pacsSettings.isConfigured() -> {
-                                statusNote = "Configure PACS settings first"
-                                destination = Destination.Settings
+                                statusNote = "Configure PACS in Settings first"
+                                selectMainTab(MainTab.Settings)
                             }
                             else -> {
                                 statusNote = ""
@@ -291,7 +331,7 @@ fun Phase3App() {
                         scope.launch {
                             settingsRepo.save(updated)
                             statusNote = "Settings saved"
-                            destination = Destination.Patient
+                            selectMainTab(MainTab.Settings)
                         }
                     },
                     onEcho = { draft ->
@@ -311,62 +351,58 @@ fun Phase3App() {
                     echoStatus = statusNote,
                 )
 
-                Destination.Worklist -> WorklistScreen(
-                    node = pacsSettings.toNode(),
-                    callingAeTitle = pacsSettings.callingAeTitle,
-                    onSelected = { entry: WorklistEntry ->
-                        val ctx = entry.toPatientStudyContext("Clinical photo/video session").copy(
-                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                            laterality = patient.laterality.takeIf { it.isNotBlank() },
+                Destination.Archive -> {
+                    if (!pacsSettings.isConfigured()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            ScreenTitle(
+                                title = "Archive",
+                                subtitle = "Query existing studies to append photos or video.",
+                            )
+                            StatusBanner(
+                                text = "Configure PACS in Settings before querying the archive.",
+                                tone = StatusTone.Warn,
+                            )
+                            ForestButton(
+                                text = "Open Settings",
+                                onClick = { selectMainTab(MainTab.Settings) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        AppendStudyScreen(
+                            node = pacsSettings.toNode(),
+                            onSelected = { entry: StudyEntry ->
+                                val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
+                                    bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
+                                    laterality = patient.laterality.takeIf { it.isNotBlank() },
+                                )
+                                startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
+                                patient = ManualPatientForm(
+                                    patientId = entry.patientId,
+                                    patientName = entry.patientName,
+                                    birthDate = entry.patientBirthDate.orEmpty(),
+                                    sex = entry.patientSex.orEmpty(),
+                                    accessionNumber = entry.accessionNumber.orEmpty(),
+                                    studyDescription = entry.studyDescription.orEmpty(),
+                                    bodyPartExamined = patient.bodyPartExamined,
+                                    laterality = patient.laterality,
+                                )
+                                audit.record(
+                                    "select_append_study",
+                                    patientId = entry.patientId,
+                                    studyUid = entry.studyInstanceUid,
+                                    detail = entry.accessionNumber.orEmpty(),
+                                )
+                                destination = Destination.Capture
+                            },
                         )
-                        startNewSession(ExamSelection(ctx, ExamSource.WORKLIST))
-                        patient = ManualPatientForm(
-                            patientId = entry.patientId,
-                            patientName = entry.patientName,
-                            birthDate = entry.patientBirthDate.orEmpty(),
-                            sex = entry.patientSex.orEmpty(),
-                            accessionNumber = entry.accessionNumber.orEmpty(),
-                            studyDescription = entry.studyDescription.orEmpty(),
-                            bodyPartExamined = patient.bodyPartExamined,
-                            laterality = patient.laterality,
-                        )
-                        audit.record(
-                            "select_worklist",
-                            patientId = entry.patientId,
-                            studyUid = entry.studyInstanceUid.orEmpty(),
-                            detail = entry.accessionNumber.orEmpty(),
-                        )
-                        destination = Destination.Capture
-                    },
-                )
-
-                Destination.AppendStudy -> AppendStudyScreen(
-                    node = pacsSettings.toNode(),
-                    onSelected = { entry: StudyEntry ->
-                        val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
-                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                            laterality = patient.laterality.takeIf { it.isNotBlank() },
-                        )
-                        startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
-                        patient = ManualPatientForm(
-                            patientId = entry.patientId,
-                            patientName = entry.patientName,
-                            birthDate = entry.patientBirthDate.orEmpty(),
-                            sex = entry.patientSex.orEmpty(),
-                            accessionNumber = entry.accessionNumber.orEmpty(),
-                            studyDescription = entry.studyDescription.orEmpty(),
-                            bodyPartExamined = patient.bodyPartExamined,
-                            laterality = patient.laterality,
-                        )
-                        audit.record(
-                            "select_append_study",
-                            patientId = entry.patientId,
-                            studyUid = entry.studyInstanceUid,
-                            detail = entry.accessionNumber.orEmpty(),
-                        )
-                        destination = Destination.Capture
-                    },
-                )
+                    }
+                }
 
                 Destination.Capture -> CaptureSessionScreen(
                     patientBanner = exam?.banner ?: "${patient.patientId} · ${patient.patientName}",
@@ -414,7 +450,7 @@ fun Phase3App() {
                     },
                     onDiscardSession = {
                         session = batchSender.discardSession(session)
-                        destination = Destination.Patient
+                        selectMainTab(lastMainTab)
                     },
                 )
 
@@ -425,7 +461,7 @@ fun Phase3App() {
                     success = resultSuccess,
                     pendingCount = pendingItems.size,
                     remainingInSession = session.pendingSendCount,
-                    onDone = { destination = Destination.Patient },
+                    onDone = { selectMainTab(lastMainTab) },
                     onBackToSession = { destination = Destination.Capture },
                     onPending = {
                         refreshPending()
@@ -498,16 +534,18 @@ private fun SendingScreen(progress: String) {
 }
 
 @Composable
-private fun PatientScreen(
+private fun WorklistTab(
     patient: ManualPatientForm,
     onPatientChange: (ManualPatientForm) -> Unit,
     pacsConfigured: Boolean,
     pendingCount: Int,
     statusNote: String,
     selectedBanner: String?,
+    node: nl.dicomcamera.dicom.DicomNode,
+    callingAeTitle: String,
     onOpenPending: () -> Unit,
-    onOpenWorklist: () -> Unit,
-    onOpenAppend: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onWorklistSelected: (WorklistEntry) -> Unit,
     onContinueManual: () -> Unit,
 ) {
     Column(
@@ -519,14 +557,19 @@ private fun PatientScreen(
     ) {
         BrandWordmark(size = 22)
         ScreenTitle(
-            title = "Start a capture session",
-            subtitle = "Bind the exam, then capture photo and video for batch C-STORE.",
+            title = "Worklist",
+            subtitle = "Pick a scheduled exam, or enter demographics manually.",
         )
 
         if (!pacsConfigured) {
             StatusBanner(
-                text = "PACS not configured yet. Open settings (gear) first.",
+                text = "PACS not configured. You can still draft a manual patient, then open Settings to connect.",
                 tone = StatusTone.Warn,
+            )
+            QuietOutlinedButton(
+                text = "Open Settings",
+                onClick = onOpenSettings,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         if (!selectedBanner.isNullOrBlank()) {
@@ -537,17 +580,21 @@ private fun PatientScreen(
         }
 
         SoftPanel {
-            SectionLabel("Path of care")
-            ForestButton(
-                text = "Modality worklist",
-                onClick = onOpenWorklist,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            QuietOutlinedButton(
-                text = "Append to existing study",
-                onClick = onOpenAppend,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            SectionLabel("Modality worklist")
+            if (pacsConfigured) {
+                WorklistScreen(
+                    node = node,
+                    callingAeTitle = callingAeTitle,
+                    onSelected = onWorklistSelected,
+                    embedded = true,
+                )
+            } else {
+                Text(
+                    "Connect a PACS in Settings to query today’s worklist.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DicomColors.Slate700,
+                )
+            }
         }
 
         SoftPanel {

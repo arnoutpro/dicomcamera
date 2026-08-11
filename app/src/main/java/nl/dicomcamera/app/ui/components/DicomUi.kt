@@ -15,11 +15,19 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -406,6 +414,7 @@ fun ChromeTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(DicomColors.Chrome)
+            .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 8.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -434,5 +443,85 @@ fun ChromeTopBar(
             }
         }
         actions()
+    }
+}
+
+enum class MainTab {
+    Worklist,
+    Archive,
+    Settings,
+}
+
+@Composable
+fun ChromeBottomBar(
+    selected: MainTab,
+    onSelect: (MainTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(DicomColors.Chrome)
+            .border(BorderStroke(1.dp, DicomColors.Hairline))
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BottomTabItem(
+            label = "Worklist",
+            selected = selected == MainTab.Worklist,
+            icon = Icons.AutoMirrored.Filled.ViewList,
+            onClick = { onSelect(MainTab.Worklist) },
+            modifier = Modifier.weight(1f),
+        )
+        BottomTabItem(
+            label = "Archive",
+            selected = selected == MainTab.Archive,
+            icon = Icons.Default.FolderOpen,
+            onClick = { onSelect(MainTab.Archive) },
+            modifier = Modifier.weight(1f),
+        )
+        BottomTabItem(
+            label = "Settings",
+            selected = selected == MainTab.Settings,
+            icon = Icons.Default.Settings,
+            onClick = { onSelect(MainTab.Settings) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun BottomTabItem(
+    label: String,
+    selected: Boolean,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fg = if (selected) DicomColors.Forest else DicomColors.Slate500
+    Column(
+        modifier = modifier
+            .clip(DicomShapes.Chip)
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = fg,
+            modifier = Modifier.size(22.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                color = fg,
+                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Bold,
+            ),
+            maxLines = 1,
+        )
     }
 }

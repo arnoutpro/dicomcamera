@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class PendingStoreQueueTest {
@@ -23,7 +24,6 @@ class PendingStoreQueueTest {
             error = "PACS not configured",
             studyInstanceUid = "1.2.3",
         )
-        // Backdate meta to 5 hours ago.
         val old = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(5)
         File(item.directory, "meta.txt").writeText(
             """
@@ -57,6 +57,3 @@ class PendingStoreQueueTest {
         assertThat(groups[0].instanceCount).isEqualTo(1)
     }
 }
-
-// Local File import for test meta rewrite
-private typealias File = java.io.File

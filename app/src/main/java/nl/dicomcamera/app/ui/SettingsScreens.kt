@@ -41,17 +41,23 @@ private enum class SettingsSection {
     LocalAe,
     RemoteDicom,
     Hl7Demographics,
+    Logging,
 }
 
 /**
- * Settings hub: Local AE, Remote DICOM (PACS), HL7 demographics façade.
+ * Settings hub: Local AE, Remote DICOM (PACS), HL7 demographics, Logging.
  */
 @Composable
 fun SettingsFlow(
     initial: PacsSettings,
-    echoStatus: String,
+    connectivityStatus: String,
+    logSummary: String,
     onSave: (PacsSettings) -> Unit,
+    onPing: (PacsSettings) -> Unit,
     onEcho: (PacsSettings) -> Unit,
+    onLoggingEnabledChange: (PacsSettings, Boolean) -> Unit,
+    onDownloadLog: () -> Unit,
+    onClearLog: () -> Unit,
     onTitleChange: (String) -> Unit = {},
 ) {
     var section by remember { mutableStateOf(SettingsSection.Hub) }
@@ -64,6 +70,7 @@ fun SettingsFlow(
                 SettingsSection.LocalAe -> "Local AE"
                 SettingsSection.RemoteDicom -> "Remote DICOM"
                 SettingsSection.Hl7Demographics -> "HL7 demographics"
+                SettingsSection.Logging -> "Logging"
             },
         )
     }
@@ -74,8 +81,9 @@ fun SettingsFlow(
             onOpenLocal = { section = SettingsSection.LocalAe },
             onOpenRemote = { section = SettingsSection.RemoteDicom },
             onOpenHl7 = { section = SettingsSection.Hl7Demographics },
+            onOpenLogging = { section = SettingsSection.Logging },
             onSave = { onSave(draft) },
-            echoStatus = echoStatus,
+            connectivityStatus = connectivityStatus,
         )
         SettingsSection.LocalAe -> LocalAeSection(
             draft = draft,
@@ -84,14 +92,26 @@ fun SettingsFlow(
         )
         SettingsSection.RemoteDicom -> RemoteDicomSection(
             draft = draft,
-            echoStatus = echoStatus,
+            connectivityStatus = connectivityStatus,
             onChange = { draft = it },
+            onPing = { onPing(draft) },
             onEcho = { onEcho(draft) },
             onBack = { section = SettingsSection.Hub },
         )
         SettingsSection.Hl7Demographics -> Hl7DemographicsSection(
             draft = draft,
             onChange = { draft = it },
+            onBack = { section = SettingsSection.Hub },
+        )
+        SettingsSection.Logging -> LoggingSection(
+            draft = draft,
+            logSummary = logSummary,
+            onEnabledChange = { enabled ->
+                draft = draft.copy(loggingEnabled = enabled)
+                onLoggingEnabledChange(draft.copy(loggingEnabled = enabled), enabled)
+            },
+            onDownloadLog = onDownloadLog,
+            onClearLog = onClearLog,
             onBack = { section = SettingsSection.Hub },
         )
     }
@@ -103,8 +123,9 @@ private fun SettingsHub(
     onOpenLocal: () -> Unit,
     onOpenRemote: () -> Unit,
     onOpenHl7: () -> Unit,
+    onOpenLogging: () -> Unit,
     onSave: () -> Unit,
-    echoStatus: String,
+    connectivityStatus: String,
 ) {
     Column(
         modifier = Modifier
@@ -115,7 +136,7 @@ private fun SettingsHub(
     ) {
         ScreenTitle(
             title = "Settings",
-            subtitle = "Modality identity, PACS archive, and EHR demographics lookup.",
+            subtitle = "Modality identity, PACS archive, EHR demographics, and diagnostics.",
         )
 
         StatusBanner(
@@ -144,6 +165,11 @@ private fun SettingsHub(
                 subtitle = draft.hl7Summary(),
                 onClick = onOpenHl7,
             )
+            SettingsNavRow(
+                title = "Logging",
+                subtitle = draft.loggingSummary(),
+                onClick = onOpenLogging,
+            )
         }
 
         ForestButton(
@@ -152,13 +178,8 @@ private fun SettingsHub(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        if (echoStatus.isNotBlank()) {
-            val tone = when {
-                echoStatus.contains("OK") -> StatusTone.Success
-                echoStatus.contains("failed", ignoreCase = true) -> StatusTone.Error
-                else -> StatusTone.Info
-            }
-            StatusBanner(text = echoStatus, tone = tone)
+        if (connectivityStatus.isNotBlank()) {
+            StatusBanner(text = connectivityStatus, tone = connectivityTone(connectivityStatus))
         }
     }
 }
@@ -253,11 +274,13 @@ private fun LocalAeSection(
 @Composable
 private fun RemoteDicomSection(
     draft: PacsSettings,
-    echoStatus: String,
+    connectivityStatus: String,
     onChange: (PacsSettings) -> Unit,
+    onPing: () -> Unit,
     onEcho: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val hostReady = draft.host.isNotBlank()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -324,32 +347,45 @@ private fun RemoteDicomSection(
             }
         }
         SoftPanel {
-            SectionLabel("Connectivity")
+            SectionLabel("Connectivity tests")
             Text(
                 "${draft.host.ifBlank { "?" }}:${draft.port} → ${draft.calledAeTitle.ifBlank { "?" }}",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
+            Text(
+                "Ping checks host reachability on the network. C-ECHO is DICOM Verification SCU — it only works against a DICOM AE (PACS), not an HL7 façade.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
             QuietOutlinedButton(
-                text = "Test C-ECHO",
+                text = "Ping host",
+                onClick = onPing,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hostReady,
+            )
+            QuietOutlinedButton(
+                text = "C-ECHO (DICOM)",
                 onClick = onEcho,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = draft.isConfigured(),
             )
-            if (!draft.isConfigured()) {
+            if (!hostReady) {
                 Text(
-                    "Fill host, port, and Called AE Title to enable C-ECHO.",
+                    "Enter Host / IP to enable Ping.",
                     style = MaterialTheme.typography.bodySmall,
                     color = DicomColors.Slate500,
                 )
             }
-            if (echoStatus.isNotBlank()) {
-                val tone = when {
-                    echoStatus.contains("OK") -> StatusTone.Success
-                    echoStatus.contains("failed", ignoreCase = true) -> StatusTone.Error
-                    else -> StatusTone.Info
-                }
-                StatusBanner(text = echoStatus, tone = tone)
+            if (!draft.isConfigured()) {
+                Text(
+                    "Fill host, port, Calling AE, and Called AE Title to enable C-ECHO.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DicomColors.Slate500,
+                )
+            }
+            if (connectivityStatus.isNotBlank()) {
+                StatusBanner(text = connectivityStatus, tone = connectivityTone(connectivityStatus))
             }
         }
     }
@@ -419,6 +455,11 @@ private fun Hl7DemographicsSection(
                 color = DicomColors.Slate700,
             )
             Text(
+                "Ping and C-ECHO in Remote DICOM do not apply here — HL7 uses HTTPS, not DIMSE.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            Text(
                 draft.hl7Summary(),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -429,4 +470,86 @@ private fun Hl7DemographicsSection(
             )
         }
     }
+}
+
+@Composable
+private fun LoggingSection(
+    draft: PacsSettings,
+    logSummary: String,
+    onEnabledChange: (Boolean) -> Unit,
+    onDownloadLog: () -> Unit,
+    onClearLog: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        ScreenTitle(
+            title = "Logging",
+            subtitle = "Diagnostic log for support. Off by default — turn on only when troubleshooting.",
+        )
+        SoftPanel {
+            SectionLabel("Activation")
+            Text(
+                "Logging stays off until you enable it here. No diagnostic file is written while disabled.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (draft.loggingEnabled) "Logging enabled" else "Logging disabled",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Switch(
+                    checked = draft.loggingEnabled,
+                    onCheckedChange = onEnabledChange,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = DicomColors.Forest,
+                        checkedThumbColor = DicomColors.White,
+                        uncheckedTrackColor = DicomColors.Hairline,
+                        uncheckedThumbColor = DicomColors.Slate500,
+                    ),
+                )
+            }
+        }
+        SoftPanel {
+            SectionLabel("Export")
+            Text(
+                logSummary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            ForestButton(
+                text = "Download log",
+                onClick = onDownloadLog,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            QuietOutlinedButton(
+                text = "Clear log",
+                onClick = onClearLog,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Download opens the system save dialog (Files / Drive). The log may include hostnames and patient IDs used during troubleshooting.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate500,
+            )
+        }
+    }
+}
+
+private fun connectivityTone(status: String): StatusTone = when {
+    status.contains("OK", ignoreCase = false) -> StatusTone.Success
+    status.contains("failed", ignoreCase = true) ||
+        status.contains("timed out", ignoreCase = true) ||
+        status.contains("unreachable", ignoreCase = true) -> StatusTone.Error
+    else -> StatusTone.Info
 }

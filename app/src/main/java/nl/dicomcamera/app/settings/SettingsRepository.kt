@@ -33,6 +33,8 @@ data class PacsSettings(
     val hl7Enabled: Boolean = false,
     val hl7BaseUrl: String = "",
     val hl7BearerToken: String = "",
+    /** Opt-in diagnostic logging (off by default). */
+    val loggingEnabled: Boolean = false,
 ) {
     fun toNode(): DicomNode = DicomNode(
         host = host.trim(),
@@ -73,6 +75,9 @@ data class PacsSettings(
         }
 
     fun hl7Summary(): String = toHl7Config().summary()
+
+    fun loggingSummary(): String =
+        if (loggingEnabled) "Enabled — export from Logging" else "Off (manual activation)"
 }
 
 class SettingsRepository(private val context: Context) {
@@ -87,6 +92,7 @@ class SettingsRepository(private val context: Context) {
         val hl7Enabled = booleanPreferencesKey("hl7_enabled")
         val hl7Url = stringPreferencesKey("hl7_base_url")
         val hl7Token = stringPreferencesKey("hl7_bearer_token")
+        val loggingEnabled = booleanPreferencesKey("logging_enabled")
     }
 
     val settings: Flow<PacsSettings> = context.dataStore.data.map { prefs ->
@@ -101,6 +107,7 @@ class SettingsRepository(private val context: Context) {
             hl7Enabled = prefs[Keys.hl7Enabled] ?: false,
             hl7BaseUrl = prefs[Keys.hl7Url].orEmpty(),
             hl7BearerToken = prefs[Keys.hl7Token].orEmpty(),
+            loggingEnabled = prefs[Keys.loggingEnabled] ?: false,
         )
     }
 
@@ -116,6 +123,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.hl7Enabled] = settings.hl7Enabled
             prefs[Keys.hl7Url] = settings.hl7BaseUrl.trim()
             prefs[Keys.hl7Token] = settings.hl7BearerToken.trim()
+            prefs[Keys.loggingEnabled] = settings.loggingEnabled
         }
     }
 }

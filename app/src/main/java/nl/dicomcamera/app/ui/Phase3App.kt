@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -70,6 +71,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nl.dicomcamera.app.diagnostics.DiagnosticLog
+import nl.dicomcamera.app.diagnostics.HostPing
 import nl.dicomcamera.app.session.CaptureKind
 import nl.dicomcamera.app.session.CaptureSession
 import nl.dicomcamera.app.session.ExamSelection
@@ -106,6 +109,8 @@ import nl.dicomcamera.dicom.StoreResult
 import nl.dicomcamera.dicom.StudyEntry
 import nl.dicomcamera.dicom.WorklistEntry
 import java.io.File
+import java.io.FileInputStream
+import java.time.Instant
 
 private const val TAG = "Phase3App"
 
@@ -149,10 +154,17 @@ fun Phase3App() {
         PendingStoreQueue(File(context.filesDir, "pending"), staging)
     }
     val audit = remember { AuditLog(File(context.filesDir, "audit/audit.csv")) }
+    val diagnosticLog = remember {
+        DiagnosticLog(File(context.filesDir, "logs/diagnostic.log"))
+    }
     val batchSender = remember { SessionBatchSender(staging, pendingQueue, audit) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { staging.purgeOrphans() }
+    }
+
+    LaunchedEffect(pacsSettings.loggingEnabled) {
+        diagnosticLog.setEnabled(pacsSettings.loggingEnabled)
     }
 
     var destination by remember { mutableStateOf(Destination.Worklist) }
@@ -166,6 +178,37 @@ fun Phase3App() {
     var statusNote by remember { mutableStateOf("") }
     var sendProgress by remember { mutableStateOf("") }
     var pendingItems by remember { mutableStateOf(pendingQueue.list()) }
+    var logUiTick by remember { mutableStateOf(0) }
+
+    val downloadLogLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri: Uri? ->
+        if (uri == null) {
+            statusNote = "Download cancelled"
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = diagnosticLog.snapshotFile()
+                    if (!src.exists() || src.length() == 0L) {
+                        error("Log file is empty — enable logging and reproduce the issue first")
+                    }
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        FileInputStream(src).use { input -> input.copyTo(out) }
+                    } ?: error("Could not open destination")
+                }
+            }
+            statusNote = outcome.fold(
+                onSuccess = {
+                    diagnosticLog.log("log_download", "exported")
+                    "Log downloaded"
+                },
+                onFailure = { "Download failed: ${it.message}" },
+            )
+            logUiTick++
+        }
+    }
 
     fun refreshPending() {
         pendingItems = pendingQueue.list()
@@ -267,6 +310,7 @@ fun Phase3App() {
                     onQueryHl7 = {
                         scope.launch {
                             statusNote = "HL7 lookup…"
+                            diagnosticLog.log("hl7_lookup_start", patient.patientId.trim())
                             val outcome = withContext(Dispatchers.IO) {
                                 runCatching {
                                     nl.dicomcamera.identity.Hl7PatientDirectory(
@@ -282,6 +326,7 @@ fun Phase3App() {
                                 val hit = list.firstOrNull()
                                 if (hit == null) {
                                     statusNote = "HL7: no patient found"
+                                    diagnosticLog.log("hl7_lookup", "no_patient")
                                 } else {
                                     patient = patient.copy(
                                         patientId = hit.patientId,
@@ -294,9 +339,11 @@ fun Phase3App() {
                                         patientId = hit.patientId,
                                         detail = hit.patientName,
                                     )
+                                    diagnosticLog.log("hl7_lookup", "ok ${hit.patientId}")
                                     statusNote = "HL7: filled ${hit.patientName}"
                                 }
                             }.onFailure { e ->
+                                diagnosticLog.log("hl7_lookup", "failed ${e.message}")
                                 statusNote = "HL7 failed: ${e.message}"
                             }
                         }
@@ -366,17 +413,38 @@ fun Phase3App() {
 
                 Destination.Settings -> SettingsFlow(
                     initial = pacsSettings,
-                    echoStatus = statusNote,
+                    connectivityStatus = statusNote,
+                    logSummary = run {
+                        logUiTick
+                        val bytes = diagnosticLog.sizeBytes()
+                        val lines = diagnosticLog.lineCount()
+                        val state = if (diagnosticLog.enabled) "ON" else "OFF"
+                        "State $state · $lines lines · $bytes bytes"
+                    },
                     onSave = { updated ->
                         scope.launch {
                             settingsRepo.save(updated)
+                            diagnosticLog.setEnabled(updated.loggingEnabled)
+                            diagnosticLog.log("settings_saved", updated.remoteSummary())
                             statusNote = "Settings saved"
+                            logUiTick++
                             selectMainTab(MainTab.Settings)
+                        }
+                    },
+                    onPing = { draft ->
+                        scope.launch {
+                            statusNote = "Ping…"
+                            val result = withContext(Dispatchers.IO) {
+                                HostPing.ping(draft.host.trim())
+                            }
+                            diagnosticLog.log("ping", result.message)
+                            statusNote = result.message
+                            logUiTick++
                         }
                     },
                     onEcho = { draft ->
                         scope.launch {
-                            statusNote = "C-ECHO..."
+                            statusNote = "C-ECHO…"
                             val result = withContext(Dispatchers.IO) {
                                 runCatching {
                                     PacsClient(draft.toNode()).use { it.echo() }
@@ -386,7 +454,30 @@ fun Phase3App() {
                                 EchoResult.Success -> "C-ECHO OK"
                                 is EchoResult.Failed -> "C-ECHO failed: ${result.message}"
                             }
+                            diagnosticLog.log("c_echo", statusNote)
+                            logUiTick++
                         }
+                    },
+                    onLoggingEnabledChange = { updated, enabled ->
+                        scope.launch {
+                            settingsRepo.save(updated.copy(loggingEnabled = enabled))
+                            diagnosticLog.setEnabled(enabled)
+                            statusNote = if (enabled) {
+                                "Logging enabled"
+                            } else {
+                                "Logging disabled"
+                            }
+                            logUiTick++
+                        }
+                    },
+                    onDownloadLog = {
+                        val name = "dicomcamera-diagnostic-${Instant.now().toString().replace(':', '-')}.log"
+                        downloadLogLauncher.launch(name)
+                    },
+                    onClearLog = {
+                        diagnosticLog.clear()
+                        statusNote = "Log cleared"
+                        logUiTick++
                     },
                     onTitleChange = { settingsTitle = it },
                 )

@@ -1,0 +1,4 @@
+{
+  "name": "dicomcamera",
+  "install": "./scripts/cloud-agent-install.sh"
+}

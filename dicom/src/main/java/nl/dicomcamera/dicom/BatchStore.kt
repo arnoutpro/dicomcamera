@@ -3,10 +3,11 @@ package nl.dicomcamera.dicom
 import java.io.File
 
 /**
- * Batch C-STORE with per-instance progress and exponential backoff retry.
+ * Batch store with per-instance progress and exponential backoff retry.
+ * Transport-agnostic: works with DIMSE C-STORE or DICOMweb STOW-RS.
  */
 class BatchStore(
-    private val clientFactory: () -> PacsClient,
+    private val storeFn: (File) -> StoreResult,
     private val maxAttempts: Int = 3,
     private val initialBackoffMs: Long = 400,
     private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
@@ -23,20 +24,18 @@ class BatchStore(
         var lastFailure: StoreResult.Failed? = null
         while (attempts < maxAttempts) {
             attempts++
-            clientFactory().use { client ->
-                when (val result = client.store(file)) {
-                    is StoreResult.Success -> return result to attempts
-                    is StoreResult.Failed -> {
-                        lastFailure = result
-                        if (attempts < maxAttempts) {
-                            val delay = initialBackoffMs * (1L shl (attempts - 1))
-                            sleeper(delay)
-                        }
+            when (val result = storeFn(file)) {
+                is StoreResult.Success -> return result to attempts
+                is StoreResult.Failed -> {
+                    lastFailure = result
+                    if (attempts < maxAttempts) {
+                        val delay = initialBackoffMs * (1L shl (attempts - 1))
+                        sleeper(delay)
                     }
                 }
             }
         }
-        return (lastFailure ?: StoreResult.Failed("C-STORE failed after $maxAttempts attempts")) to attempts
+        return (lastFailure ?: StoreResult.Failed("Store failed after $maxAttempts attempts")) to attempts
     }
 
     fun storeAll(
@@ -49,5 +48,19 @@ class BatchStore(
             onProgress(outcome)
             outcome
         }
+    }
+
+    companion object {
+        fun dimse(node: DicomNode, maxAttempts: Int = 3): BatchStore =
+            BatchStore(
+                storeFn = { file -> PacsClient(node).use { it.store(file) } },
+                maxAttempts = maxAttempts,
+            )
+
+        fun gateway(endpoint: PacsEndpoint, maxAttempts: Int = 3): BatchStore =
+            BatchStore(
+                storeFn = { file -> PacsGateway.fromEndpoint(endpoint).store(file) },
+                maxAttempts = maxAttempts,
+            )
     }
 }

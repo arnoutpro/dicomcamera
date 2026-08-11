@@ -465,6 +465,7 @@ fun DicomTextField(
     label: String,
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
+    enabled: Boolean = true,
 ) {
     OutlinedTextField(
         value = value,
@@ -480,6 +481,7 @@ fun DicomTextField(
         },
         modifier = modifier.fillMaxWidth(),
         singleLine = singleLine,
+        enabled = enabled,
         shape = DicomShapes.Control,
         textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
         colors = OutlinedTextFieldDefaults.colors(

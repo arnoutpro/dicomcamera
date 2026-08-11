@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -24,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import nl.dicomcamera.app.BuildConfig
 import nl.dicomcamera.app.settings.PacsSettings
@@ -36,9 +40,11 @@ import nl.dicomcamera.app.ui.components.SoftPanel
 import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
 import nl.dicomcamera.app.ui.theme.DicomColors
+import nl.dicomcamera.dicom.TransportMode
 
 private enum class SettingsSection {
     Hub,
+    Transport,
     LocalAe,
     RemoteDicom,
     Hl7Demographics,
@@ -46,7 +52,7 @@ private enum class SettingsSection {
 }
 
 /**
- * Settings hub: Local AE, Remote DICOM (PACS), HL7 demographics, Logging.
+ * Settings hub: Transport, Local AE, Remote DICOM (PACS), HL7 demographics, Logging/ATNA.
  */
 @Composable
 fun SettingsFlow(
@@ -59,15 +65,18 @@ fun SettingsFlow(
     onLoggingEnabledChange: (PacsSettings, Boolean) -> Unit,
     onDownloadLog: () -> Unit,
     onClearLog: () -> Unit,
+    onExportAtna: () -> Unit,
     onTitleChange: (String) -> Unit = {},
 ) {
     var section by remember { mutableStateOf(SettingsSection.Hub) }
     var draft by remember(initial) { mutableStateOf(initial) }
+    val locked = draft.managedByMdm
 
     SideEffect {
         onTitleChange(
             when (section) {
                 SettingsSection.Hub -> "Settings"
+                SettingsSection.Transport -> "Transport"
                 SettingsSection.LocalAe -> "Local AE"
                 SettingsSection.RemoteDicom -> "Remote DICOM"
                 SettingsSection.Hl7Demographics -> "HL7 demographics"
@@ -79,6 +88,7 @@ fun SettingsFlow(
     when (section) {
         SettingsSection.Hub -> SettingsHub(
             draft = draft,
+            onOpenTransport = { section = SettingsSection.Transport },
             onOpenLocal = { section = SettingsSection.LocalAe },
             onOpenRemote = { section = SettingsSection.RemoteDicom },
             onOpenHl7 = { section = SettingsSection.Hl7Demographics },
@@ -86,13 +96,21 @@ fun SettingsFlow(
             onSave = { onSave(draft) },
             connectivityStatus = connectivityStatus,
         )
+        SettingsSection.Transport -> TransportSection(
+            draft = draft,
+            locked = locked,
+            onChange = { draft = it },
+            onBack = { section = SettingsSection.Hub },
+        )
         SettingsSection.LocalAe -> LocalAeSection(
             draft = draft,
+            locked = locked,
             onChange = { draft = it },
             onBack = { section = SettingsSection.Hub },
         )
         SettingsSection.RemoteDicom -> RemoteDicomSection(
             draft = draft,
+            locked = locked,
             connectivityStatus = connectivityStatus,
             onChange = { draft = it },
             onPing = { onPing(draft) },
@@ -107,12 +125,14 @@ fun SettingsFlow(
         SettingsSection.Logging -> LoggingSection(
             draft = draft,
             logSummary = logSummary,
+            connectivityStatus = connectivityStatus,
             onEnabledChange = { enabled ->
                 draft = draft.copy(loggingEnabled = enabled)
                 onLoggingEnabledChange(draft.copy(loggingEnabled = enabled), enabled)
             },
             onDownloadLog = onDownloadLog,
             onClearLog = onClearLog,
+            onExportAtna = onExportAtna,
             onBack = { section = SettingsSection.Hub },
         )
     }
@@ -121,6 +141,7 @@ fun SettingsFlow(
 @Composable
 private fun SettingsHub(
     draft: PacsSettings,
+    onOpenTransport: () -> Unit,
     onOpenLocal: () -> Unit,
     onOpenRemote: () -> Unit,
     onOpenHl7: () -> Unit,
@@ -143,9 +164,20 @@ private fun SettingsHub(
             },
             tone = if (draft.isConfigured()) StatusTone.Success else StatusTone.Warn,
         )
+        if (draft.managedByMdm) {
+            StatusBanner(
+                text = "Managed by MDM — PACS fields are locked.",
+                tone = StatusTone.Info,
+            )
+        }
 
         SoftPanel {
             SectionLabel("Configuration")
+            SettingsNavRow(
+                title = "Transport",
+                subtitle = draft.transportSummary(),
+                onClick = onOpenTransport,
+            )
             SettingsNavRow(
                 title = "Local AE",
                 subtitle = draft.localSummary(),
@@ -172,6 +204,7 @@ private fun SettingsHub(
             text = "Save all settings",
             onClick = onSave,
             modifier = Modifier.fillMaxWidth(),
+            enabled = !draft.managedByMdm,
         )
 
         if (connectivityStatus.isNotBlank()) {
@@ -228,8 +261,68 @@ private fun SettingsNavRow(
 }
 
 @Composable
+private fun TransportSection(
+    draft: PacsSettings,
+    locked: Boolean,
+    onChange: (PacsSettings) -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        ScreenTitle(
+            title = "Transport",
+            subtitle = "How this device talks to the archive (Phase 4 dual stack).",
+        )
+        SoftPanel {
+            SectionLabel("Mode")
+            listOf(
+                TransportMode.DIMSE to "DIMSE — classic DICOM (C-ECHO, MWL, C-STORE)",
+                TransportMode.DICOMWEB to "DICOMweb — QIDO-RS query + STOW-RS store",
+            ).forEach { (mode, label) ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = draft.transportMode == mode,
+                            onClick = { if (!locked) onChange(draft.copy(transportMode = mode)) },
+                            role = Role.RadioButton,
+                            enabled = !locked,
+                        )
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = draft.transportMode == mode,
+                        onClick = null,
+                        enabled = !locked,
+                        colors = RadioButtonDefaults.colors(selectedColor = DicomColors.Forest),
+                    )
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+            Text(
+                "MWL always uses DIMSE. In DICOMweb mode, keep host/AE filled if you need worklist.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
+    }
+}
+
+@Composable
 private fun LocalAeSection(
     draft: PacsSettings,
+    locked: Boolean,
     onChange: (PacsSettings) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -249,8 +342,9 @@ private fun LocalAeSection(
             SectionLabel("Application Entity")
             DicomTextField(
                 value = draft.callingAeTitle,
-                onValueChange = { onChange(draft.copy(callingAeTitle = it)) },
+                onValueChange = { if (!locked) onChange(draft.copy(callingAeTitle = it)) },
                 label = "Calling AE Title",
+                enabled = !locked,
             )
             Text(
                 "Register this AE Title on the PACS (e.g. DICOMCAM).",
@@ -259,8 +353,11 @@ private fun LocalAeSection(
             )
             DicomTextField(
                 value = draft.modality,
-                onValueChange = { onChange(draft.copy(modality = it.uppercase().take(16))) },
+                onValueChange = {
+                    if (!locked) onChange(draft.copy(modality = it.uppercase().take(16)))
+                },
                 label = "Modality code",
+                enabled = !locked,
             )
             Text(
                 "Usually XC for clinical photography / video.",
@@ -269,8 +366,9 @@ private fun LocalAeSection(
             )
             DicomTextField(
                 value = draft.stationName,
-                onValueChange = { onChange(draft.copy(stationName = it)) },
+                onValueChange = { if (!locked) onChange(draft.copy(stationName = it)) },
                 label = "Station name (optional)",
+                enabled = !locked,
             )
         }
         SoftPanel {
@@ -288,6 +386,7 @@ private fun LocalAeSection(
 @Composable
 private fun RemoteDicomSection(
     draft: PacsSettings,
+    locked: Boolean,
     connectivityStatus: String,
     onChange: (PacsSettings) -> Unit,
     onPing: () -> Unit,
@@ -305,29 +404,50 @@ private fun RemoteDicomSection(
         QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
         ScreenTitle(
             title = "Remote DICOM",
-            subtitle = "Archive / PACS endpoint for worklist, query, and C-STORE.",
+            subtitle = "Archive / PACS endpoint for worklist, query, and store.",
         )
         SoftPanel {
-            SectionLabel("PACS node")
+            SectionLabel("PACS node (DIMSE / MWL)")
             DicomTextField(
                 value = draft.host,
-                onValueChange = { onChange(draft.copy(host = it)) },
+                onValueChange = { if (!locked) onChange(draft.copy(host = it)) },
                 label = "Host / IP",
+                enabled = !locked,
             )
             DicomTextField(
                 value = draft.port.toString(),
                 onValueChange = { text ->
-                    onChange(draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port))
+                    if (!locked) {
+                        onChange(
+                            draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port),
+                        )
+                    }
                 },
                 label = "DIMSE port",
+                enabled = !locked,
             )
             DicomTextField(
                 value = draft.calledAeTitle,
-                onValueChange = { onChange(draft.copy(calledAeTitle = it)) },
+                onValueChange = { if (!locked) onChange(draft.copy(calledAeTitle = it)) },
                 label = "Called AE Title",
+                enabled = !locked,
             )
             Text(
-                "Remote archive AE (e.g. ORTHANC, PACS).",
+                "Remote archive AE (e.g. ORTHANC, PACS). Also used as MWL fallback in DICOMweb mode.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
+        SoftPanel {
+            SectionLabel("DICOMweb")
+            DicomTextField(
+                value = draft.dicomWebBaseUrl,
+                onValueChange = { if (!locked) onChange(draft.copy(dicomWebBaseUrl = it)) },
+                label = "DICOMweb base URL",
+                enabled = !locked,
+            )
+            Text(
+                "Example: https://pacs.example/dicom-web — used for QIDO-RS and STOW-RS when Transport is DICOMweb.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
@@ -350,7 +470,8 @@ private fun RemoteDicomSection(
                 )
                 Switch(
                     checked = draft.useTls,
-                    onCheckedChange = { onChange(draft.copy(useTls = it)) },
+                    onCheckedChange = { if (!locked) onChange(draft.copy(useTls = it)) },
+                    enabled = !locked,
                     colors = SwitchDefaults.colors(
                         checkedTrackColor = DicomColors.Forest,
                         checkedThumbColor = DicomColors.White,
@@ -363,12 +484,17 @@ private fun RemoteDicomSection(
         SoftPanel {
             SectionLabel("Connectivity tests")
             Text(
-                "${draft.host.ifBlank { "?" }}:${draft.port} → ${draft.calledAeTitle.ifBlank { "?" }}",
+                when (draft.transportMode) {
+                    TransportMode.DIMSE ->
+                        "${draft.host.ifBlank { "?" }}:${draft.port} → ${draft.calledAeTitle.ifBlank { "?" }}"
+                    TransportMode.DICOMWEB ->
+                        draft.dicomWebBaseUrl.ifBlank { "DICOMweb URL not set" }
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
             Text(
-                "Ping checks host reachability on the network. C-ECHO is DICOM Verification SCU — it only works against a DICOM AE (PACS), not an HL7 façade.",
+                "Ping checks host reachability (DIMSE host). Archive test uses C-ECHO or DICOMweb ping depending on Transport.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
@@ -379,12 +505,15 @@ private fun RemoteDicomSection(
                 enabled = hostReady,
             )
             QuietOutlinedButton(
-                text = "C-ECHO (DICOM)",
+                text = when (draft.transportMode) {
+                    TransportMode.DIMSE -> "C-ECHO (DICOM)"
+                    TransportMode.DICOMWEB -> "Ping DICOMweb"
+                },
                 onClick = onEcho,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = draft.isConfigured(),
             )
-            if (!hostReady) {
+            if (!hostReady && draft.transportMode == TransportMode.DIMSE) {
                 Text(
                     "Enter Host / IP to enable Ping.",
                     style = MaterialTheme.typography.bodySmall,
@@ -393,7 +522,12 @@ private fun RemoteDicomSection(
             }
             if (!draft.isConfigured()) {
                 Text(
-                    "Fill host, port, Calling AE, and Called AE Title to enable C-ECHO.",
+                    when (draft.transportMode) {
+                        TransportMode.DIMSE ->
+                            "Fill host, port, Calling AE, and Called AE Title to enable C-ECHO."
+                        TransportMode.DICOMWEB ->
+                            "Set a DICOMweb base URL (http/https) to enable ping."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = DicomColors.Slate500,
                 )
@@ -469,7 +603,7 @@ private fun Hl7DemographicsSection(
                 color = DicomColors.Slate700,
             )
             Text(
-                "Ping and C-ECHO in Remote DICOM do not apply here — HL7 uses HTTPS, not DIMSE.",
+                "Ping and archive tests in Remote DICOM do not apply here — HL7 uses HTTPS, not DIMSE.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
@@ -490,9 +624,11 @@ private fun Hl7DemographicsSection(
 private fun LoggingSection(
     draft: PacsSettings,
     logSummary: String,
+    connectivityStatus: String,
     onEnabledChange: (Boolean) -> Unit,
     onDownloadLog: () -> Unit,
     onClearLog: () -> Unit,
+    onExportAtna: () -> Unit,
     onBack: () -> Unit,
 ) {
     Column(
@@ -556,6 +692,22 @@ private fun LoggingSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate500,
             )
+        }
+        SoftPanel {
+            SectionLabel("ATNA audit")
+            Text(
+                "Local audit stays on device. Export creates ATNA-style syslog lines for SIEM hand-off.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            QuietOutlinedButton(
+                text = "Export ATNA audit log",
+                onClick = onExportAtna,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (connectivityStatus.isNotBlank() && connectivityStatus.contains("ATNA", ignoreCase = true)) {
+                StatusBanner(text = connectivityStatus, tone = StatusTone.Info)
+            }
         }
     }
 }

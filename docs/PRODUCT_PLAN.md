@@ -225,7 +225,7 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Photos and videos in one exam session; reliable send; still no durable local archive.
 
-**Status:** Implemented on branch `cursor/phase-3-video-session-cbc8`.
+**Status:** Done (merged). Session tray, video SOP, batch store, pending queue, capture/review UX.
 
 - Video capture via CameraX; encode to agreed DICOM video SOP (or multi-frame policy documented)
 - Multi-shot session tray (in-memory / encrypted staging only)
@@ -240,6 +240,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 ### Phase 4 — Vendor independence hardening + IHE alignment
 
 **Goal:** Works across PACS brands; hospital-ready integration story.
+
+**Status:** In progress on branch `cursor/phase-4-on-main-cbc8` — dual stack + MDM + ATNA + docs integrated onto current Phase 3 UX.
 
 - Dual stack: **DIMSE** and **DICOMweb** (QIDO-RS query, STOW-RS store) selectable per site
 - Character set / timezone / date handling edge cases

@@ -102,14 +102,17 @@ import nl.dicomcamera.app.ui.components.StatusTone
 import nl.dicomcamera.app.ui.theme.DicomColors
 import nl.dicomcamera.app.ui.theme.DicomShapes
 import nl.dicomcamera.app.ui.theme.DicomType
+import nl.dicomcamera.dicom.AtnaAuditExporter
 import nl.dicomcamera.dicom.AuditLog
+import nl.dicomcamera.dicom.BatchStore
 import nl.dicomcamera.dicom.EchoResult
-import nl.dicomcamera.dicom.PacsClient
+import nl.dicomcamera.dicom.PacsGateway
 import nl.dicomcamera.dicom.PatientStudyContext
 import nl.dicomcamera.dicom.PendingStoreQueue
 import nl.dicomcamera.dicom.SecureStaging
 import nl.dicomcamera.dicom.StoreResult
 import nl.dicomcamera.dicom.StudyEntry
+import nl.dicomcamera.dicom.TransportMode
 import nl.dicomcamera.dicom.WorklistEntry
 import java.io.File
 import java.io.FileInputStream
@@ -166,6 +169,9 @@ fun Phase3App() {
         ArchivedPatientStore(File(context.filesDir, "archived-patients"))
     }
     val audit = remember { AuditLog(File(context.filesDir, "audit/audit.csv")) }
+    val atnaExporter = remember {
+        AtnaAuditExporter(File(context.filesDir, "audit/atna"), aet = "DICOMCAM")
+    }
     val diagnosticLog = remember {
         DiagnosticLog(File(context.filesDir, "logs/diagnostic.log"))
     }
@@ -344,7 +350,7 @@ fun Phase3App() {
                     pendingCount = pendingItems.size,
                     statusNote = statusNote,
                     selectedBanner = exam?.banner,
-                    node = pacsSettings.toNode(),
+                    node = pacsSettings.toEndpoint(),
                     callingAeTitle = pacsSettings.callingAeTitle,
                     modality = pacsSettings.modality.ifBlank { "XC" },
                     onOpenPending = {
@@ -490,17 +496,26 @@ fun Phase3App() {
                     },
                     onEcho = { draft ->
                         scope.launch {
-                            statusNote = "C-ECHO…"
+                            statusNote = when (draft.transportMode) {
+                                TransportMode.DIMSE -> "C-ECHO…"
+                                TransportMode.DICOMWEB -> "DICOMweb ping…"
+                            }
                             val result = withContext(Dispatchers.IO) {
                                 runCatching {
-                                    PacsClient(draft.toNode()).use { it.echo() }
-                                }.getOrElse { EchoResult.Failed(it.message ?: "echo failed", it) }
+                                    PacsGateway.fromEndpoint(draft.toEndpoint()).ping()
+                                }.getOrElse { EchoResult.Failed(it.message ?: "ping failed", it) }
                             }
                             statusNote = when (result) {
-                                EchoResult.Success -> "C-ECHO OK"
-                                is EchoResult.Failed -> "C-ECHO failed: ${result.message}"
+                                EchoResult.Success -> when (draft.transportMode) {
+                                    TransportMode.DIMSE -> "C-ECHO OK"
+                                    TransportMode.DICOMWEB -> "DICOMweb ping OK"
+                                }
+                                is EchoResult.Failed -> when (draft.transportMode) {
+                                    TransportMode.DIMSE -> "C-ECHO failed: ${result.message}"
+                                    TransportMode.DICOMWEB -> "DICOMweb ping failed: ${result.message}"
+                                }
                             }
-                            diagnosticLog.log("c_echo", statusNote)
+                            diagnosticLog.log("archive_ping", statusNote)
                             logUiTick++
                         }
                     },
@@ -524,6 +539,16 @@ fun Phase3App() {
                         diagnosticLog.clear()
                         statusNote = "Log cleared"
                         logUiTick++
+                    },
+                    onExportAtna = {
+                        scope.launch {
+                            val exported = withContext(Dispatchers.IO) {
+                                atnaExporter.exportFromCsv(File(context.filesDir, "audit/audit.csv"))
+                            }
+                            statusNote = "ATNA export: ${exported.eventCount} events → ${exported.file.name}"
+                            diagnosticLog.log("atna_export", statusNote)
+                            logUiTick++
+                        }
                     },
                     onTitleChange = { settingsTitle = it },
                 )
@@ -700,7 +725,7 @@ if (pacsSettings.isConfigured()) {
                                 SectionLabel("Append from PACS")
                             }
                             AppendStudyScreen(
-                                node = pacsSettings.toNode(),
+                                endpoint = pacsSettings.toEndpoint(),
                                 embedded = true,
                                 onSelected = { entry: StudyEntry ->
                                     val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
@@ -798,9 +823,7 @@ if (pacsSettings.isConfigured()) {
                             statusNote = "Resending…"
                             diagnosticLog.log("pending_resend", item.id)
                             val result = withContext(Dispatchers.IO) {
-                                val batch = nl.dicomcamera.dicom.BatchStore(
-                                    clientFactory = { PacsClient(pacsSettings.toNode()) },
-                                )
+                                val batch = BatchStore.gateway(pacsSettings.toEndpoint())
                                 batch.storeWithRetry(item.dicomFile).first
                             }
                             when (result) {
@@ -832,9 +855,7 @@ if (pacsSettings.isConfigured()) {
                             var fail = 0
                             group.items.forEach { item ->
                                 val result = withContext(Dispatchers.IO) {
-                                    val batch = nl.dicomcamera.dicom.BatchStore(
-                                        clientFactory = { PacsClient(pacsSettings.toNode()) },
-                                    )
+                                    val batch = BatchStore.gateway(pacsSettings.toEndpoint())
                                     batch.storeWithRetry(item.dicomFile).first
                                 }
                                 when (result) {
@@ -909,7 +930,7 @@ private fun WorklistTab(
     pendingCount: Int,
     statusNote: String,
     selectedBanner: String?,
-    node: nl.dicomcamera.dicom.DicomNode,
+    node: nl.dicomcamera.dicom.PacsEndpoint,
     callingAeTitle: String,
     modality: String,
     onOpenPending: () -> Unit,
@@ -968,7 +989,7 @@ private fun WorklistTab(
                 }
                 if (pacsConfigured) {
                     WorklistScreen(
-                        node = node,
+                        endpoint = node,
                         callingAeTitle = callingAeTitle,
                         onSelected = onWorklistSelected,
                         embedded = true,

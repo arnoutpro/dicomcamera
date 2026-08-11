@@ -122,7 +122,7 @@ class VideoAndSessionTest {
         }
 
         val batch = BatchStore(
-            clientFactory = { PacsClient(node()) },
+            storeFn = { file -> PacsClient(node()).use { it.store(file) } },
             maxAttempts = 2,
             initialBackoffMs = 10,
         )

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<restrictions xmlns:android="http://schemas.android.com/apk/res/android">
+    <restriction
+        android:key="pacs_transport"
+        android:title="PACS transport"
+        android:restrictionType="choice"
+        android:defaultValue="DIMSE"
+        android:entries="@array/transport_entries"
+        android:entryValues="@array/transport_values" />
+    <restriction
+        android:key="pacs_host"
+        android:title="PACS host"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="pacs_port"
+        android:title="PACS DIMSE port"
+        android:restrictionType="integer"
+        android:defaultValue="11112" />
+    <restriction
+        android:key="pacs_called_aet"
+        android:title="Called AE Title"
+        android:restrictionType="string"
+        android:defaultValue="PACS" />
+    <restriction
+        android:key="pacs_calling_aet"
+        android:title="Calling AE Title"
+        android:restrictionType="string"
+        android:defaultValue="DICOMCAM" />
+    <restriction
+        android:key="pacs_use_tls"
+        android:title="Use DICOM TLS"
+        android:restrictionType="bool"
+        android:defaultValue="false" />
+    <restriction
+        android:key="pacs_dicomweb_url"
+        android:title="DICOMweb base URL"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="modality_code"
+        android:title="Modality code"
+        android:restrictionType="string"
+        android:defaultValue="XC" />
+    <restriction
+        android:key="station_name"
+        android:title="Station name"
+        android:restrictionType="string"
+        android:defaultValue="" />
+</restrictions>

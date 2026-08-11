@@ -38,11 +38,12 @@ import nl.dicomcamera.app.ui.components.SoftPanel
 import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
 import nl.dicomcamera.app.ui.theme.DicomColors
-import nl.dicomcamera.dicom.DicomNode
 import nl.dicomcamera.dicom.FindResult
-import nl.dicomcamera.dicom.PacsClient
+import nl.dicomcamera.dicom.PacsEndpoint
+import nl.dicomcamera.dicom.PacsGateway
 import nl.dicomcamera.dicom.StudyEntry
 import nl.dicomcamera.dicom.StudyQuery
+import nl.dicomcamera.dicom.TransportMode
 import nl.dicomcamera.dicom.WorklistEntry
 import nl.dicomcamera.dicom.WorklistQuery
 import java.time.LocalDate
@@ -62,7 +63,7 @@ private enum class WorklistSort {
 
 @Composable
 fun WorklistScreen(
-    node: DicomNode,
+    endpoint: PacsEndpoint,
     callingAeTitle: String,
     onSelected: (WorklistEntry) -> Unit,
     embedded: Boolean = false,
@@ -77,7 +78,15 @@ fun WorklistScreen(
     var patientId by remember { mutableStateOf("") }
     var accession by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<WorklistEntry>>(emptyList()) }
-    var status by remember { mutableStateOf("Query today's worklist") }
+    var status by remember {
+        mutableStateOf(
+            if (endpoint.transportMode == TransportMode.DICOMWEB) {
+                "MWL is DIMSE-only — uses DIMSE AE if host/AE configured"
+            } else {
+                "Query today's worklist"
+            },
+        )
+    }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
 
@@ -99,17 +108,15 @@ fun WorklistScreen(
         status = "Querying MWL…"
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                PacsClient(node).use {
-                    it.findWorklist(
-                        WorklistQuery(
-                            patientId = patientId.trim().ifBlank { null },
-                            accessionNumber = accession.trim().ifBlank { null },
-                            modality = modality.ifBlank { "XC" },
-                            scheduledStationAeTitle = callingAeTitle,
-                            scheduledDate = scheduledDate,
-                        ),
-                    )
-                }
+                PacsGateway.fromEndpoint(endpoint).findWorklist(
+                    WorklistQuery(
+                        patientId = patientId.trim().ifBlank { null },
+                        accessionNumber = accession.trim().ifBlank { null },
+                        modality = modality.ifBlank { "XC" },
+                        scheduledStationAeTitle = callingAeTitle,
+                        scheduledDate = scheduledDate,
+                    ),
+                )
             }
             loading = false
             when (result) {
@@ -309,7 +316,7 @@ private fun worklistComparator(sort: WorklistSort): Comparator<WorklistEntry> =
 
 @Composable
 fun AppendStudyScreen(
-    node: DicomNode,
+    endpoint: PacsEndpoint,
     onSelected: (StudyEntry) -> Unit,
     embedded: Boolean = false,
 ) {
@@ -317,7 +324,14 @@ fun AppendStudyScreen(
     var patientId by remember { mutableStateOf("") }
     var accession by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<StudyEntry>>(emptyList()) }
-    var status by remember { mutableStateOf("Find an existing study to append photos") }
+    var status by remember {
+        mutableStateOf(
+            when (endpoint.transportMode) {
+                TransportMode.DICOMWEB -> "Find study via QIDO-RS"
+                TransportMode.DIMSE -> "Find an existing study to append photos"
+            },
+        )
+    }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
 
@@ -347,14 +361,12 @@ fun AppendStudyScreen(
                     status = "Querying studies..."
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
-                            PacsClient(node).use {
-                                it.findStudies(
-                                    StudyQuery(
-                                        patientId = patientId.trim().ifBlank { null },
-                                        accessionNumber = accession.trim().ifBlank { null },
-                                    ),
-                                )
-                            }
+                            PacsGateway.fromEndpoint(endpoint).findStudies(
+                                StudyQuery(
+                                    patientId = patientId.trim().ifBlank { null },
+                                    accessionNumber = accession.trim().ifBlank { null },
+                                ),
+                            )
                         }
                         loading = false
                         when (result) {

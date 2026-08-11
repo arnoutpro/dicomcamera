@@ -154,7 +154,7 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 **Stack leanings (to validate in Phase 0):**
 
 - UI: Kotlin + Jetpack Compose + CameraX
-- DICOM: native DCMTK via NDK **or** pure-JVM dcm4che — pick one primary stack in Phase 0 spike
+- DICOM: **dcm4che** (see ADR 0001); DICOMweb later
 - Identity: internal interfaces first; stub manual + MWL; reserve HL7 v2 façade + FHIR R4 clients
 - Local test harness: Orthanc and/or dcm4chee + sample MWL; later HAPI FHIR + HL7 test façade
 - Config: encrypted SharedPreferences / DataStore; MDM managed configurations

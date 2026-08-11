@@ -24,17 +24,18 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import nl.dicomcamera.dicom.DicomNode
 import nl.dicomcamera.dicom.FindResult
-import nl.dicomcamera.dicom.PacsClient
+import nl.dicomcamera.dicom.PacsEndpoint
+import nl.dicomcamera.dicom.PacsGateway
 import nl.dicomcamera.dicom.StudyEntry
 import nl.dicomcamera.dicom.StudyQuery
+import nl.dicomcamera.dicom.TransportMode
 import nl.dicomcamera.dicom.WorklistEntry
 import nl.dicomcamera.dicom.WorklistQuery
 
 @Composable
 fun WorklistScreen(
-    node: DicomNode,
+    endpoint: PacsEndpoint,
     callingAeTitle: String,
     onSelected: (WorklistEntry) -> Unit,
 ) {
@@ -42,7 +43,15 @@ fun WorklistScreen(
     var patientId by remember { mutableStateOf("") }
     var accession by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<WorklistEntry>>(emptyList()) }
-    var status by remember { mutableStateOf("Query today's XC worklist") }
+    var status by remember {
+        mutableStateOf(
+            if (endpoint.transportMode == TransportMode.DICOMWEB) {
+                "MWL is DIMSE-only — uses DIMSE AE if host/AE configured, else fails"
+            } else {
+                "Query today's XC worklist"
+            },
+        )
+    }
     var loading by remember { mutableStateOf(false) }
 
     Column(
@@ -72,16 +81,14 @@ fun WorklistScreen(
                 status = "Querying MWL..."
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
-                        PacsClient(node).use {
-                            it.findWorklist(
-                                WorklistQuery(
-                                    patientId = patientId.trim().ifBlank { null },
-                                    accessionNumber = accession.trim().ifBlank { null },
-                                    modality = "XC",
-                                    scheduledStationAeTitle = callingAeTitle,
-                                ),
-                            )
-                        }
+                        PacsGateway.fromEndpoint(endpoint).findWorklist(
+                            WorklistQuery(
+                                patientId = patientId.trim().ifBlank { null },
+                                accessionNumber = accession.trim().ifBlank { null },
+                                modality = "XC",
+                                scheduledStationAeTitle = callingAeTitle,
+                            ),
+                        )
                     }
                     loading = false
                     when (result) {
@@ -130,14 +137,21 @@ fun WorklistScreen(
 
 @Composable
 fun AppendStudyScreen(
-    node: DicomNode,
+    endpoint: PacsEndpoint,
     onSelected: (StudyEntry) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var patientId by remember { mutableStateOf("") }
     var accession by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<StudyEntry>>(emptyList()) }
-    var status by remember { mutableStateOf("Find an existing study to append photos") }
+    var status by remember {
+        mutableStateOf(
+            when (endpoint.transportMode) {
+                TransportMode.DICOMWEB -> "Find study via QIDO-RS"
+                TransportMode.DIMSE -> "Find an existing study to append photos"
+            },
+        )
+    }
     var loading by remember { mutableStateOf(false) }
 
     Column(
@@ -171,14 +185,12 @@ fun AppendStudyScreen(
                 status = "Querying studies..."
                 scope.launch {
                     val result = withContext(Dispatchers.IO) {
-                        PacsClient(node).use {
-                            it.findStudies(
-                                StudyQuery(
-                                    patientId = patientId.trim().ifBlank { null },
-                                    accessionNumber = accession.trim().ifBlank { null },
-                                ),
-                            )
-                        }
+                        PacsGateway.fromEndpoint(endpoint).findStudies(
+                            StudyQuery(
+                                patientId = patientId.trim().ifBlank { null },
+                                accessionNumber = accession.trim().ifBlank { null },
+                            ),
+                        )
                     }
                     loading = false
                     when (result) {

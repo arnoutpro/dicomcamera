@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import nl.dicomcamera.dicom.AuditLog
 import nl.dicomcamera.dicom.BatchStore
-import nl.dicomcamera.dicom.PacsClient
 import nl.dicomcamera.dicom.PatientStudyContext
 import nl.dicomcamera.dicom.PendingStoreQueue
 import nl.dicomcamera.dicom.PhotographicImageEncoder
@@ -60,11 +59,7 @@ class SessionBatchSender(
         var working = session
         var successCount = 0
         var failureCount = 0
-        val batch = BatchStore(
-            clientFactory = { PacsClient(settings.toNode()) },
-            maxAttempts = 3,
-            initialBackoffMs = 400,
-        )
+        val batch = BatchStore.gateway(settings.toEndpoint(), maxAttempts = 3)
         val encodeContext = examContext.copy(
             studyInstanceUid = session.studyInstanceUid,
             seriesInstanceUid = session.seriesInstanceUid,

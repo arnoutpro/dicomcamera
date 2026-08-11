@@ -13,7 +13,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.4.0-phase3"
+        versionName = "0.5.0-phase4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -28,6 +28,7 @@ android {
             buildConfigField("int", "DEFAULT_PACS_PORT", "4242")
             buildConfigField("String", "DEFAULT_CALLED_AET", "\"ORTHANC\"")
             buildConfigField("String", "DEFAULT_CALLING_AET", "\"DICOMCAM\"")
+            buildConfigField("String", "DEFAULT_DICOMWEB_URL", "\"http://10.0.2.2:8042/dicom-web\"")
         }
         create("staging") {
             dimension = "env"
@@ -37,6 +38,7 @@ android {
             buildConfigField("int", "DEFAULT_PACS_PORT", "11112")
             buildConfigField("String", "DEFAULT_CALLED_AET", "\"PACS\"")
             buildConfigField("String", "DEFAULT_CALLING_AET", "\"DICOMCAM\"")
+            buildConfigField("String", "DEFAULT_DICOMWEB_URL", "\"\"")
         }
     }
 

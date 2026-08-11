@@ -8,9 +8,6 @@ import org.dcm4che3.data.VR
 import org.dcm4che3.io.DicomOutputStream
 import org.dcm4che3.util.ByteUtils
 import java.io.File
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 
 /**
  * Encodes a JPEG baseline still as DICOM VL Photographic Image Storage
@@ -44,8 +41,15 @@ class PhotographicImageEncoder(
             setString(Tag.ImplementationVersionName, VR.SH, IMPLEMENTATION_VERSION)
         }
 
-        val nowDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
-        val nowTime = LocalTime.now().format(DateTimeFormatter.ofPattern("HHmmss"))
+        val nowDate = DicomDateTime.todayDa()
+        val nowTime = DicomDateTime.nowTm()
+        val tz = DicomDateTime.timezoneOffsetFromUtc()
+        val charset = DicomText.specificCharacterSet(
+            context.patientId,
+            context.patientName,
+            context.studyDescription,
+            context.seriesDescription,
+        )
 
         val fragments = Fragments(VR.OB, false, 2).apply {
             add(ByteUtils.EMPTY_BYTES)
@@ -53,7 +57,7 @@ class PhotographicImageEncoder(
         }
 
         val dataset = Attributes().apply {
-            setString(Tag.SpecificCharacterSet, VR.CS, "ISO_IR 100")
+            setString(Tag.SpecificCharacterSet, VR.CS, charset)
             setString(Tag.ImageType, VR.CS, "ORIGINAL", "PRIMARY")
             setString(Tag.SOPClassUID, VR.UI, UID.VLPhotographicImageStorage)
             setString(Tag.SOPInstanceUID, VR.UI, sopUid)
@@ -65,8 +69,8 @@ class PhotographicImageEncoder(
             setString(Tag.PatientID, VR.LO, context.patientId)
             setString(Tag.PatientName, VR.PN, context.patientName)
             // Type 2 attributes — empty if unknown
-            setString(Tag.PatientBirthDate, VR.DA, context.patientBirthDate.orEmpty())
-            setString(Tag.PatientSex, VR.CS, context.patientSex.orEmpty())
+            setString(Tag.PatientBirthDate, VR.DA, DicomText.normalizeDa(context.patientBirthDate).orEmpty())
+            setString(Tag.PatientSex, VR.CS, DicomText.normalizeSex(context.patientSex).orEmpty())
             setString(Tag.AccessionNumber, VR.SH, context.accessionNumber.orEmpty())
             setString(Tag.ReferringPhysicianName, VR.PN, "")
             setString(Tag.StudyID, VR.SH, "")
@@ -96,9 +100,10 @@ class PhotographicImageEncoder(
             setString(Tag.AcquisitionTime, VR.TM, nowTime)
             setString(Tag.InstanceCreationDate, VR.DA, nowDate)
             setString(Tag.InstanceCreationTime, VR.TM, nowTime)
+            setString(Tag.TimezoneOffsetFromUTC, VR.SH, tz)
 
             setString(Tag.Manufacturer, VR.LO, "DICOM Camera")
-            setString(Tag.ManufacturerModelName, VR.LO, "Android Phase3")
+            setString(Tag.ManufacturerModelName, VR.LO, "Android Phase4")
 
             // Acquisition Context Sequence Type 2 — empty
             setNull(Tag.AcquisitionContextSequence, VR.SQ)
@@ -132,7 +137,7 @@ class PhotographicImageEncoder(
 
     companion object {
         const val IMPLEMENTATION_CLASS_UID = "2.25.33300112233445566778899"
-        const val IMPLEMENTATION_VERSION = "DICOMCAM_0_4"
+        const val IMPLEMENTATION_VERSION = "DICOMCAM_0_5"
     }
 }
 

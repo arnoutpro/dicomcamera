@@ -9,5 +9,12 @@
   "DicomModalities": {},
   "RegisteredUsers": {},
   "StorageDirectory": "/var/lib/orthanc/db",
-  "IndexDirectory": "/var/lib/orthanc/db"
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/",
+    "EnableWado": true,
+    "EnableStow": true,
+    "EnableQido": true
+  }
 }

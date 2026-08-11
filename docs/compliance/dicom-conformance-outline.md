@@ -1,14 +1,14 @@
-# DICOM Conformance Statement — outline (Phase 0)
+# DICOM Conformance Statement — outline
 
-Formal statement will be published before external pilots. This outline tracks SOP classes we intend to claim.
+Formal draft: [`DICOM_CONFORMANCE_STATEMENT_DRAFT.md`](DICOM_CONFORMANCE_STATEMENT_DRAFT.md).
 
 ## Implementation
 
 | Item | Value |
 |---|---|
 | Application | DICOM Camera (Android) |
-| Version | 0.4.x (Phase 3) |
-| AE Title | Configurable (default `DICOMCAM`) |
+| Version | 0.5.x (Phase 4) |
+| AE Title | Configurable / MDM (default `DICOMCAM`) |
 
 ## Networking
 
@@ -16,7 +16,7 @@ Formal statement will be published before external pilots. This outline tracks S
 |---|---|---|
 | Verification SOP Class | SCU | 0 |
 | Secondary Capture Image Storage | SCU (Storage) | 0 |
-| VL Photographic Image Storage | SCU (Storage) | 1 (preferred encoding) |
+| VL Photographic Image Storage | SCU (Storage) | 1 |
 | Basic Worklist Management (C-FIND) | SCU | 2 |
 | Study Root Query/Retrieve Information Model – FIND | SCU | 2 |
 | Video Photographic Image Storage | SCU (Storage) | 3 |

@@ -305,7 +305,7 @@ Optional companion (Phase 5): `connector/` — on-prem HL7 v2 MLLP ↔ HTTPS dem
 
 ## Open decisions (resolve in Phase 0–1)
 
-1. **DICOM toolkit:** DCMTK (NDK) vs dcm4che (JVM) vs hybrid
+1. **DICOM toolkit:** **Accepted — dcm4che 5.31.x** (see `docs/adr/0001-dicom-toolkit-dcm4che.md`); revisit native/DCMTK only if video/perf requires it
 2. **Offline policy:** block capture when PACS unreachable vs short encrypted staging queue
 3. **Video SOP class:** which encapsulated/multi-frame profile to standardize on
 4. **Primary transfer syntax:** JPEG Baseline vs JPEG-LS vs uncompressed for photos

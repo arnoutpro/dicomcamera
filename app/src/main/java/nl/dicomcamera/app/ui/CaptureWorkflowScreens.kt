@@ -218,8 +218,13 @@ fun ReviewSessionScreen(
     onArchiveToPacs: () -> Unit,
     onCancelAll: () -> Unit,
     pacsConfigured: Boolean,
+    previewItem: SessionItem? = null,
+    onPreviewItemChange: (SessionItem?) -> Unit = {},
 ) {
-    var previewItem by remember { mutableStateOf<SessionItem?>(null) }
+    // System / predictive back closes preview instead of leaving the session.
+    androidx.activity.compose.BackHandler(enabled = previewItem != null) {
+        onPreviewItemChange(null)
+    }
 
     // Full-screen preview uses the whole viewport (scroll layout was clipping/pixelating).
     previewItem?.let { item ->
@@ -232,19 +237,21 @@ fun ReviewSessionScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(DicomColors.Ink.copy(alpha = 0.72f))
+                    .background(DicomColors.Ink.copy(alpha = 0.82f))
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     item.label,
                     style = MaterialTheme.typography.titleSmall,
                     color = DicomColors.White,
                 )
-                QuietOutlinedButton(
+                // High-contrast CTA on dark chrome — QuietOutlined (forest on dark) was easy to miss.
+                ForestButton(
                     text = "Close preview",
-                    onClick = { previewItem = null },
+                    onClick = { onPreviewItemChange(null) },
                     modifier = Modifier.fillMaxWidth(),
+                    containerColor = DicomColors.Teal,
                 )
             }
         }
@@ -286,7 +293,7 @@ fun ReviewSessionScreen(
                 session.items.forEach { item ->
                     ReviewThumb(
                         item = item,
-                        onOpen = { previewItem = item },
+                        onOpen = { onPreviewItemChange(item) },
                         onDelete = { onDeleteItem(item.id) },
                         onMarkup = { onMarkupItem(item) },
                     )

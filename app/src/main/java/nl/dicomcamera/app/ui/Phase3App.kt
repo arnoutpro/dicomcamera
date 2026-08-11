@@ -187,6 +187,8 @@ fun Phase3App() {
     var sessionStep by remember { mutableStateOf(SessionStep.Setup) }
     var worklistHint by remember { mutableStateOf<String?>(null) }
     var logUiTick by remember { mutableStateOf(0) }
+    var sessionBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+    var sessionPreviewOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -262,8 +264,19 @@ fun Phase3App() {
     }
 
     fun goBack() {
+        if (destination == Destination.Session) {
+            if (sessionBackHandler?.invoke() == true) return
+            // Leaving from Patient setup — discard ephemeral session work.
+            session = batchSender.discardSession(session)
+            exam = null
+            worklistHint = null
+            sessionStep = SessionStep.Setup
+            destination = lastMainTab.toDestination()
+            return
+        }
         destination = when (destination) {
-            Destination.Session, Destination.Pending -> lastMainTab.toDestination()
+            Destination.Pending -> lastMainTab.toDestination()
+            Destination.Session -> lastMainTab.toDestination() // unreachable
             Destination.Worklist, Destination.Archive, Destination.Settings -> destination
         }
     }
@@ -273,12 +286,14 @@ fun Phase3App() {
         Destination.Worklist -> "Worklist"
         Destination.Archive -> "Archive"
         Destination.Settings -> settingsTitle
-        Destination.Session -> when (sessionStep) {
-            SessionStep.Setup -> "Patient"
-            SessionStep.Review -> "Review"
-            SessionStep.Markup -> "Mark up"
-            SessionStep.Archiving -> "Archiving"
-            SessionStep.Result -> "Archive result"
+        Destination.Session -> when {
+            sessionStep == SessionStep.Review && sessionPreviewOpen -> "Preview"
+            sessionStep == SessionStep.Setup -> "Patient"
+            sessionStep == SessionStep.Review -> "Review"
+            sessionStep == SessionStep.Markup -> "Mark up"
+            sessionStep == SessionStep.Archiving -> "Archiving"
+            sessionStep == SessionStep.Result -> "Archive result"
+            else -> "Session"
         }
         Destination.Pending -> "Pending uploads"
     }
@@ -766,6 +781,8 @@ if (pacsSettings.isConfigured()) {
                         destination = Destination.Pending
                     },
                     onStatus = { statusNote = it },
+                    onProvideBackHandler = { sessionBackHandler = it },
+                    onPreviewOpenChange = { sessionPreviewOpen = it },
                 )
 
 

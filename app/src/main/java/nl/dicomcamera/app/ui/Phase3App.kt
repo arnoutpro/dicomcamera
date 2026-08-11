@@ -502,12 +502,16 @@ fun Phase3App() {
                     },
                     onSave = { updated ->
                         scope.launch {
-                            settingsRepo.save(updated)
-                            diagnosticLog.setEnabled(updated.loggingEnabled)
-                            diagnosticLog.log("settings_saved", updated.remoteSummary())
-                            statusNote = "Settings saved"
+                            val saved = settingsRepo.save(updated)
+                            if (saved) {
+                                diagnosticLog.setEnabled(updated.loggingEnabled)
+                                diagnosticLog.log("settings_saved", updated.remoteSummary())
+                                statusNote = "Settings saved — ${updated.remoteSummary()}"
+                            } else {
+                                statusNote = "Settings not saved — locked by MDM"
+                                diagnosticLog.log("settings_save_blocked", "mdm")
+                            }
                             logUiTick++
-                            selectMainTab(MainTab.Settings)
                         }
                     },
                     onPing = { draft ->
@@ -548,12 +552,16 @@ fun Phase3App() {
                     },
                     onLoggingEnabledChange = { updated, enabled ->
                         scope.launch {
-                            settingsRepo.save(updated.copy(loggingEnabled = enabled))
-                            diagnosticLog.setEnabled(enabled)
-                            statusNote = if (enabled) {
-                                "Logging enabled"
+                            val saved = settingsRepo.save(updated.copy(loggingEnabled = enabled))
+                            if (saved) {
+                                diagnosticLog.setEnabled(enabled)
+                                statusNote = if (enabled) {
+                                    "Logging enabled"
+                                } else {
+                                    "Logging disabled"
+                                }
                             } else {
-                                "Logging disabled"
+                                statusNote = "Logging change not saved — locked by MDM"
                             }
                             logUiTick++
                         }

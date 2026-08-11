@@ -31,19 +31,58 @@ object ManagedConfig {
     const val KEY_IDENTITY_MODE = "identity_lookup_mode"
     const val KEY_ADMIN_LOCKED = "admin_config_locked"
 
+    private val KNOWN_KEYS = setOf(
+        KEY_TRANSPORT,
+        KEY_HOST,
+        KEY_PORT,
+        KEY_CALLED_AET,
+        KEY_CALLING_AET,
+        KEY_USE_TLS,
+        KEY_DICOMWEB_URL,
+        KEY_MODALITY,
+        KEY_STATION,
+        KEY_HL7_ENABLED,
+        KEY_HL7_URL,
+        KEY_HL7_TOKEN,
+        KEY_FHIR_ENABLED,
+        KEY_FHIR_URL,
+        KEY_FHIR_TOKEN,
+        KEY_IDENTITY_MODE,
+        KEY_ADMIN_LOCKED,
+    )
+
+    /**
+     * True only when MDM actually pushed one of our restriction keys.
+     * An empty/OEM junk restrictions bundle must not block local saves.
+     */
     fun isManaged(context: Context): Boolean {
-        val rm = context.getSystemService(Context.RESTRICTIONS_SERVICE) as? RestrictionsManager
-            ?: return false
-        val bundle = rm.applicationRestrictions ?: return false
-        return !bundle.isEmpty
+        val bundle = restrictionsBundle(context) ?: return false
+        return hasKnownRestriction(bundle)
     }
 
     fun merge(context: Context, local: PacsSettings): PacsSettings {
-        val rm = context.getSystemService(Context.RESTRICTIONS_SERVICE) as? RestrictionsManager
-            ?: return local
-        val bundle = rm.applicationRestrictions ?: return local
-        if (bundle.isEmpty) return local
+        val bundle = restrictionsBundle(context) ?: return local
+        if (!hasKnownRestriction(bundle)) return local
         return applyBundle(local, bundle).copy(managedByMdm = true)
+    }
+
+    private fun restrictionsBundle(context: Context): Bundle? {
+        val rm = context.getSystemService(Context.RESTRICTIONS_SERVICE) as? RestrictionsManager
+            ?: return null
+        return rm.applicationRestrictions
+    }
+
+    internal fun hasKnownRestriction(bundle: Bundle): Boolean {
+        if (bundle.isEmpty) return false
+        return KNOWN_KEYS.any { key ->
+            if (!bundle.containsKey(key)) return@any false
+            when (val value = bundle.get(key)) {
+                null -> false
+                is String -> value.isNotBlank()
+                is Boolean, is Int, is Long -> true
+                else -> true
+            }
+        }
     }
 
     internal fun applyBundle(local: PacsSettings, bundle: Bundle): PacsSettings {

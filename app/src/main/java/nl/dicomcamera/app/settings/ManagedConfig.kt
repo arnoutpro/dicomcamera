@@ -19,6 +19,8 @@ object ManagedConfig {
     const val KEY_CALLING_AET = "pacs_calling_aet"
     const val KEY_USE_TLS = "pacs_use_tls"
     const val KEY_DICOMWEB_URL = "pacs_dicomweb_url"
+    const val KEY_MODALITY = "modality_code"
+    const val KEY_STATION = "station_name"
 
     fun isManaged(context: Context): Boolean {
         val rm = context.getSystemService(Context.RESTRICTIONS_SERVICE) as? RestrictionsManager
@@ -60,6 +62,12 @@ object ManagedConfig {
         }
         bundle.getString(KEY_DICOMWEB_URL)?.takeIf { it.isNotBlank() }?.let {
             next = next.copy(dicomWebBaseUrl = it)
+        }
+        bundle.getString(KEY_MODALITY)?.takeIf { it.isNotBlank() }?.let {
+            next = next.copy(modality = it.trim().uppercase())
+        }
+        bundle.getString(KEY_STATION)?.let {
+            next = next.copy(stationName = it)
         }
         return next
     }

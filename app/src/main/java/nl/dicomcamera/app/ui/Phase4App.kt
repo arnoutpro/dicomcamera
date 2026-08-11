@@ -133,6 +133,7 @@ fun Phase4App() {
     }
 
     var destination by remember { mutableStateOf(Destination.Patient) }
+    var settingsTitle by remember { mutableStateOf("Settings") }
     var patient by remember { mutableStateOf(ManualPatientForm()) }
     var exam by remember { mutableStateOf<ExamSelection?>(null) }
     var session by remember { mutableStateOf(CaptureSession()) }
@@ -171,7 +172,7 @@ fun Phase4App() {
                     Text(
                         when (destination) {
                             Destination.Patient -> "DICOM Camera"
-                            Destination.Settings -> "PACS settings"
+                            Destination.Settings -> settingsTitle
                             Destination.Worklist -> "Modality worklist"
                             Destination.AppendStudy -> "Append to study"
                             Destination.Capture -> "Session capture"
@@ -218,29 +219,29 @@ fun Phase4App() {
                     },
                     onOpenWorklist = {
                         if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS settings first"
-                            destination = Destination.Settings
+                            statusNote = "Worklist needs a PACS — open Settings to configure, or continue manually in demo mode"
                         } else {
+                            statusNote = ""
                             destination = Destination.Worklist
                         }
                     },
                     onOpenAppend = {
                         if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS settings first"
-                            destination = Destination.Settings
+                            statusNote = "Append needs a PACS — open Settings to configure, or continue manually in demo mode"
                         } else {
+                            statusNote = ""
                             destination = Destination.AppendStudy
                         }
                     },
                     onContinueManual = {
                         when {
                             !patient.isValid() -> statusNote = "Patient ID and Name are required"
-                            !pacsSettings.isConfigured() -> {
-                                statusNote = "Configure PACS settings first"
-                                destination = Destination.Settings
-                            }
                             else -> {
-                                statusNote = ""
+                                statusNote = if (pacsSettings.isConfigured()) {
+                                    ""
+                                } else {
+                                    "Demo mode: capture locally; configure PACS in Settings before Send all"
+                                }
                                 startNewSession(
                                     ExamSelection(
                                         context = PatientStudyContext(
@@ -250,7 +251,7 @@ fun Phase4App() {
                                             patientSex = patient.sex.takeIf { it.isNotBlank() },
                                             accessionNumber = patient.accessionNumber.takeIf { it.isNotBlank() },
                                             studyDescription = patient.studyDescription.takeIf { it.isNotBlank() },
-                                            modality = "XC",
+                                            modality = pacsSettings.modality.ifBlank { "XC" },
                                             seriesDescription = "Clinical photo/video session",
                                             bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
                                             laterality = patient.laterality.takeIf { it.isNotBlank() },
@@ -265,8 +266,9 @@ fun Phase4App() {
                     },
                 )
 
-                Destination.Settings -> SettingsScreen(
+                Destination.Settings -> SettingsFlow(
                     initial = pacsSettings,
+                    echoStatus = statusNote,
                     onSave = { updated ->
                         scope.launch {
                             settingsRepo.save(updated)
@@ -278,7 +280,7 @@ fun Phase4App() {
                             destination = Destination.Patient
                         }
                     },
-                    onEcho = { draft ->
+                    onTestConnectivity = { draft ->
                         scope.launch {
                             statusNote = when (draft.transportMode) {
                                 TransportMode.DIMSE -> "C-ECHO..."
@@ -306,7 +308,8 @@ fun Phase4App() {
                             statusNote = "ATNA export: ${exported.eventCount} events → ${exported.file.name}"
                         }
                     },
-                    echoStatus = statusNote,
+                    onClose = { destination = Destination.Patient },
+                    titleOverride = { settingsTitle = it },
                 )
 
                 Destination.Worklist -> WorklistScreen(
@@ -370,10 +373,12 @@ fun Phase4App() {
                     patientBanner = exam?.banner ?: "${patient.patientId} · ${patient.patientName}",
                     session = session,
                     staging = staging,
+                    pacsConfigured = pacsSettings.isConfigured(),
                     onAddItem = { item -> session = session.add(item) },
                     onDiscardItem = { id ->
                         session = batchSender.discardItem(session, id)
                     },
+                    onOpenSettings = { destination = Destination.Settings },
                     onSendAll = {
                         val currentExam = exam
                         if (currentExam == null) {
@@ -382,6 +387,11 @@ fun Phase4App() {
                         }
                         if (session.pendingSendCount == 0) {
                             statusNote = "Add at least one photo or video"
+                            return@CaptureSessionScreen
+                        }
+                        if (!pacsSettings.isConfigured()) {
+                            statusNote = "Configure PACS in Settings before sending"
+                            destination = Destination.Settings
                             return@CaptureSessionScreen
                         }
                         destination = Destination.Sending
@@ -504,13 +514,18 @@ private fun PatientScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Phase 4 — DIMSE/DICOMweb dual stack, session tray, MDM-ready",
+            text = "Phase 4 — explore capture anytime; connect PACS when ready to send",
             style = MaterialTheme.typography.bodyMedium,
         )
         if (!pacsConfigured) {
             Text(
-                text = "PACS not configured yet. Open settings (gear) first.",
-                color = MaterialTheme.colorScheme.secondary,
+                text = "Demo mode: enter a patient and capture photos/videos. Worklist, append, and Send need PACS (gear icon).",
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        } else {
+            Text(
+                text = "PACS configured — worklist, append, and send are available.",
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         if (!selectedBanner.isNullOrBlank()) {
@@ -602,7 +617,13 @@ private fun PatientScreen(
             }
         }
         Button(onClick = onContinueManual, modifier = Modifier.fillMaxWidth()) {
-            Text("Continue with manual patient")
+            Text(
+                if (pacsConfigured) {
+                    "Continue with manual patient"
+                } else {
+                    "Try capture (demo mode)"
+                },
+            )
         }
         if (pendingCount > 0) {
             OutlinedButton(onClick = onOpenPending, modifier = Modifier.fillMaxWidth()) {
@@ -616,141 +637,14 @@ private fun PatientScreen(
 }
 
 @Composable
-private fun SettingsScreen(
-    initial: PacsSettings,
-    onSave: (PacsSettings) -> Unit,
-    onEcho: (PacsSettings) -> Unit,
-    onExportAtna: () -> Unit,
-    echoStatus: String,
-) {
-    var draft by remember(initial) { mutableStateOf(initial) }
-    val locked = draft.managedByMdm
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (locked) {
-            Text(
-                text = "Managed by MDM — values come from app restrictions.",
-                color = MaterialTheme.colorScheme.secondary,
-            )
-        }
-        Text(text = "Transport", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf(TransportMode.DIMSE to "DIMSE", TransportMode.DICOMWEB to "DICOMweb").forEach { (mode, label) ->
-                Row(
-                    Modifier.selectable(
-                        selected = draft.transportMode == mode,
-                        onClick = { if (!locked) draft = draft.copy(transportMode = mode) },
-                        role = Role.RadioButton,
-                        enabled = !locked,
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(
-                        selected = draft.transportMode == mode,
-                        onClick = null,
-                        enabled = !locked,
-                    )
-                    Text(text = label, modifier = Modifier.padding(end = 8.dp))
-                }
-            }
-        }
-        OutlinedTextField(
-            value = draft.host,
-            onValueChange = { if (!locked) draft = draft.copy(host = it) },
-            label = { Text("PACS host (DIMSE / MWL fallback)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !locked,
-        )
-        OutlinedTextField(
-            value = draft.port.toString(),
-            onValueChange = { text ->
-                if (!locked) {
-                    draft = draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port)
-                }
-            },
-            label = { Text("PACS DIMSE port") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !locked,
-        )
-        OutlinedTextField(
-            value = draft.calledAeTitle,
-            onValueChange = { if (!locked) draft = draft.copy(calledAeTitle = it) },
-            label = { Text("Called AE Title") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !locked,
-        )
-        OutlinedTextField(
-            value = draft.callingAeTitle,
-            onValueChange = { if (!locked) draft = draft.copy(callingAeTitle = it) },
-            label = { Text("Calling AE Title") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !locked,
-        )
-        OutlinedTextField(
-            value = draft.dicomWebBaseUrl,
-            onValueChange = { if (!locked) draft = draft.copy(dicomWebBaseUrl = it) },
-            label = { Text("DICOMweb base URL") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !locked,
-        )
-        Text(text = "DICOM TLS (DIMSE)", style = MaterialTheme.typography.labelLarge)
-        Text(
-            text = "Uses system trust store. Install hospital private CA via MDM / device policy.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(if (draft.useTls) "TLS enabled" else "TLS disabled")
-            Switch(
-                checked = draft.useTls,
-                onCheckedChange = { if (!locked) draft = draft.copy(useTls = it) },
-                enabled = !locked,
-            )
-        }
-        OutlinedButton(onClick = { onEcho(draft) }, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                when (draft.transportMode) {
-                    TransportMode.DIMSE -> "Test C-ECHO"
-                    TransportMode.DICOMWEB -> "Test DICOMweb"
-                },
-            )
-        }
-        OutlinedButton(onClick = onExportAtna, modifier = Modifier.fillMaxWidth()) {
-            Text("Export ATNA audit log")
-        }
-        Button(
-            onClick = { onSave(draft) },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !locked,
-        ) {
-            Text("Save settings")
-        }
-        if (echoStatus.isNotBlank()) {
-            Text(echoStatus)
-        }
-    }
-}
-
-@Composable
 private fun CaptureSessionScreen(
     patientBanner: String,
     session: CaptureSession,
     staging: SecureStaging,
+    pacsConfigured: Boolean,
     onAddItem: (SessionItem) -> Unit,
     onDiscardItem: (String) -> Unit,
+    onOpenSettings: () -> Unit,
     onSendAll: () -> Unit,
     onDiscardSession: () -> Unit,
 ) {
@@ -782,9 +676,16 @@ private fun CaptureSessionScreen(
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            text = "Confirm patient. Capture multiple photos/videos, then Send all.",
+            text = "Confirm patient. Capture multiple photos/videos into the session tray.",
             style = MaterialTheme.typography.bodySmall,
         )
+        if (!pacsConfigured) {
+            Text(
+                text = "Demo mode — capture works offline. Configure PACS before Send all.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
 
         if (!hasCameraPermission) {
             Button(
@@ -940,7 +841,22 @@ private fun CaptureSessionScreen(
             enabled = session.pendingSendCount > 0 && !isRecording,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Send all (${session.pendingSendCount})")
+            Text(
+                if (pacsConfigured) {
+                    "Send all (${session.pendingSendCount})"
+                } else {
+                    "Send all — needs PACS (${session.pendingSendCount})"
+                },
+            )
+        }
+        if (!pacsConfigured) {
+            OutlinedButton(
+                onClick = onOpenSettings,
+                enabled = !isRecording,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Open PACS settings")
+            }
         }
         OutlinedButton(
             onClick = onDiscardSession,

@@ -37,4 +37,14 @@
         android:title="DICOMweb base URL"
         android:restrictionType="string"
         android:defaultValue="" />
+    <restriction
+        android:key="modality_code"
+        android:title="Modality code"
+        android:restrictionType="string"
+        android:defaultValue="XC" />
+    <restriction
+        android:key="station_name"
+        android:title="Station name"
+        android:restrictionType="string"
+        android:defaultValue="" />
 </restrictions>

@@ -25,6 +25,8 @@ data class PacsSettings(
     val callingAeTitle: String = BuildConfig.DEFAULT_CALLING_AET,
     val useTls: Boolean = false,
     val dicomWebBaseUrl: String = BuildConfig.DEFAULT_DICOMWEB_URL,
+    val modality: String = "XC",
+    val stationName: String = "",
     val managedByMdm: Boolean = false,
 ) {
     fun toNode(): DicomNode = DicomNode(
@@ -57,6 +59,8 @@ class SettingsRepository(private val context: Context) {
         val calling = stringPreferencesKey("pacs_calling_aet")
         val tls = booleanPreferencesKey("pacs_use_tls")
         val webUrl = stringPreferencesKey("pacs_dicomweb_url")
+        val modality = stringPreferencesKey("modality_code")
+        val station = stringPreferencesKey("station_name")
     }
 
     val settings: Flow<PacsSettings> = context.dataStore.data.map { prefs ->
@@ -70,13 +74,14 @@ class SettingsRepository(private val context: Context) {
             callingAeTitle = prefs[Keys.calling] ?: BuildConfig.DEFAULT_CALLING_AET,
             useTls = prefs[Keys.tls] ?: false,
             dicomWebBaseUrl = prefs[Keys.webUrl] ?: BuildConfig.DEFAULT_DICOMWEB_URL,
+            modality = prefs[Keys.modality] ?: "XC",
+            stationName = prefs[Keys.station].orEmpty(),
         )
         ManagedConfig.merge(context, local)
     }
 
     suspend fun save(settings: PacsSettings) {
         if (ManagedConfig.isManaged(context)) {
-            // MDM wins — do not persist conflicting local overrides for locked keys.
             return
         }
         context.dataStore.edit { prefs ->
@@ -87,6 +92,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.calling] = settings.callingAeTitle.trim()
             prefs[Keys.tls] = settings.useTls
             prefs[Keys.webUrl] = settings.dicomWebBaseUrl.trim()
+            prefs[Keys.modality] = settings.modality.trim().ifBlank { "XC" }
+            prefs[Keys.station] = settings.stationName.trim()
         }
     }
 }

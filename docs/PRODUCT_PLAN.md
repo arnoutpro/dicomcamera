@@ -2,6 +2,8 @@
 
 Vendor-independent Android app for clinical photo/video documentation: capture at the point of care, bind to the correct patient/order via DICOM Worklist or PACS query, store to PACS, then purge local copies.
 
+**Primary market:** Europe, with the **Netherlands first** (AVG, NEN 7510 expectations, Dutch hospital IT / EPD landscape). Other EU markets follow the same MDR + GDPR baseline.
+
 ## Positioning
 
 Alternatives researched:
@@ -51,11 +53,23 @@ Out of MVP (explicitly later): iOS, annotation/markup suite, offline long-lived 
 
 Key identity tags to preserve when appending to an exam: Patient ID, Study Instance UID, Accession Number, Requested Procedure ID, Scheduled Procedure Step ID; generate new Series Instance UID + SOP Instance UIDs for new captures.
 
-### HL7
+### HL7 v2 vs FHIR — what we actually need
 
-- App does **not** need to speak raw HL7 v2 for MVP if the site’s RIS/broker exposes **MWL**.
-- Design for future: HL7 v2 ADT/ORM awareness via broker, and/or **HL7 FHIR** (`Patient`, `ServiceRequest`, `ImagingStudy`) for modern EHR launch.
-- Keep demographics source-of-truth at RIS/EHR; app is a modality, not an MPI.
+**Imaging path = DICOM. Not FHIR.**  
+Pixels, study UIDs, worklist, and PACS store stay on DICOM (DIMSE and/or DICOMweb). That is the MVP integration surface and what makes us PACS-vendor independent.
+
+**HL7 v2** already feeds most hospital worklists: ADT/ORM (or equivalent) land in the RIS/broker, which exposes **Modality Worklist**. The app consumes MWL as a DICOM SCU. We do **not** implement HL7 v2 in the Android client for MVP.
+
+**FHIR is optional EHR “front door” only — not part of MVP.**  
+Some modern EPDs can launch or deep-link a context (`Patient`, `ServiceRequest`, `ImagingStudy`) via FHIR / SMART-on-FHIR. That can help open the right patient/order on the phone when MWL is awkward to expose to mobile devices. It does **not** replace C-STORE/STOW or MWL for sites that already have them.
+
+| Concern | MVP approach | Later (Phase 5+, only if a pilot needs it) |
+|---|---|---|
+| Who is the patient / which order? | MWL + PACS C-FIND + barcode/Accession | Optional FHIR read / SMART launch |
+| Where do images go? | DICOM C-STORE / STOW-RS → PACS | Still DICOM (FHIR DocumentReference is not our primary archive path) |
+| Dutch EPD variety (HiX, Epic, etc.) | Stay standards-based; avoid vendor SDKs | Per-site FHIR profiles (e.g. Nictiz-oriented) only when required |
+
+Keep demographics source-of-truth at RIS/EPD; the app is a **modality**, not an MPI.
 
 ### IHE (target actors)
 
@@ -67,17 +81,33 @@ Key identity tags to preserve when appending to an exam: Patient ID, Study Insta
 | ITI **ATNA** | Audit trail of query/store/auth events |
 | ITI **CT** (Consistent Time) | Device clock sync expectation (NTP via MDM) |
 
-### Security / privacy / regulatory posture
+### Security / privacy / regulatory posture (EU / NL first)
 
-Treat as handling **health data** from day one:
+Treat as handling **bijzondere persoonsgegevens / health data** from day one. Target buyers: Dutch (then EU) hospitals and clinics.
+
+**Privacy (AVG / GDPR)**
+
+- Run a **DPIA (GEB)** early — before pilot with real patients; refresh when workflows change
+- Lawful basis + processing agreement (**verwerkersovereenkomst**) with each zorginstelling; clarify controller vs processor roles (typically: zorginstelling = verwerkingsverantwoordelijke, we = verwerker for any telemetry; on-device processing under their instruction)
+- Data minimization: retention on device = **until successful PACS ACK**, then wipe; no gallery; no backup to Google Photos
+- Logging: prefer technical/audit metadata over clinical content; define retention of audit logs
+- Align with Dutch hospital expectations around **NEN 7510** (and related 7512/7513 for exchange/logging) in security design and supplier questionnaires
+- Rights of data subjects handled via the zorginstelling’s process; app supports purge and access constraints
+
+**Medical device (EU MDR)**
+
+- Intended purpose draft in Phase 0: clinical photographic/video documentation for inclusion in the patient imaging record via PACS — **not** autonomous diagnosis
+- Classification analysis with regulatory counsel (documentation aid vs Rule 11 software device is a real decision; do not assume “not a device”)
+- If in scope of MDR: quality management (e.g. ISO 13485-aligned), clinical evaluation, technical file, UDI, post-market surveillance — architecture must support controlled releases, SBOM, traceability from day one
+- Dutch market: same MDR baseline; local procurement often asks for NEN 7510 conformity evidence + DPIA outcomes
+
+**Security baseline**
 
 - Encrypted app-private storage only; never write to system gallery / MediaStore
-- TLS for DICOMweb; DICOM TLS (or VPN-only LAN) for DIMSE
+- TLS for DICOMweb; DICOM TLS (or VPN-only hospital LAN) for DIMSE
 - Authn: device + user (hospital IdP later); configurable AE Titles
 - Wipe policy: delete local objects immediately after PACS success ACK; crash-safe purge on next launch
-- GDPR/AVG: DPIA, DPA with sites, data minimization, retention = “until sent”
-- Medical device classification (EU MDR / local rules): decide early with counsel; architecture should support a controlled quality system (versioning, audit, SBOM)
-- Hospital IT: MDM config (AE Title, PACS host, TLS certs, feature flags)
+- Hospital IT: MDM config (AE Title, PACS host, TLS certs, feature flags); no consumer Play-store-only assumption for production
 
 ---
 
@@ -124,8 +154,9 @@ Treat as handling **health data** from day one:
 - Decide DIMSE library and whether DICOMweb is Phase 2 or Phase 3
 - Threat model + data-flow diagram (capture → encode → store → wipe)
 - Compliance checklist stub (DICOM conformance statement outline)
+- Draft **intended purpose** (MDR) + DPIA/GEB outline for NL pilots; flag open classification questions for counsel
 
-**Exit criteria:** Hello-PACS demo on a device/emulator; written ADR for DICOM stack.
+**Exit criteria:** Hello-PACS demo on a device/emulator; written ADR for DICOM stack; DPIA outline + intended-purpose draft exists.
 
 ---
 
@@ -191,18 +222,19 @@ Treat as handling **health data** from day one:
 
 ---
 
-### Phase 5 — EHR-friendly launch + compliance packaging
+### Phase 5 — EHR launch options + NL/EU compliance packaging
 
-**Goal:** Fit beside any EHR without vendor lock-in; ready for regulated rollout discussions.
+**Goal:** Pilot-ready for a Dutch/EU hospital IT, security, and privacy review — still vendor-independent.
 
-- Context launch patterns: QR/barcode of Accession or Patient ID; optional FHIR `ImagingStudy` / `ServiceRequest` deep link
+- Context launch without FHIR first: QR/barcode of Accession or Patient ID (works with any EPD sticker/wristband workflow)
+- **FHIR only if a concrete pilot requires it** (see HL7/FHIR section): read `Patient` / `ServiceRequest` / `ImagingStudy` or SMART launch — never as the image archive API
 - Unscheduled / emergency workflow (create study with generated UIDs under local policy)
 - Role-based access (operator vs admin config)
-- Privacy UX: clear “not stored on device” messaging; remote wipe assumptions under MDM
-- Quality system artifacts: SBOM, versioned releases, test evidence pack
-- MDR/regulatory pathway decision recorded; engage notified body/counsel as needed
+- Privacy UX: clear “niet blijvend op dit apparaat” messaging; MDM remote wipe assumptions
+- Compliance pack: DPIA/GEB, verwerkersovereenkomst template, NEN 7510 questionnaire answers, SBOM, versioned releases, test evidence
+- MDR pathway decision recorded with counsel; QMS artifacts if classified as device
 
-**Exit criteria:** Pilot-ready build + compliance pack for a hospital IT/security review.
+**Exit criteria:** Pilot-ready build + NL-oriented privacy/security pack; FHIR deferred unless a named site blocks without it.
 
 ---
 
@@ -240,14 +272,15 @@ app/
 2. **Offline policy:** block capture when PACS unreachable vs short encrypted staging queue
 3. **Video SOP class:** which encapsulated/multi-frame profile to standardize on
 4. **Primary transfer syntax:** JPEG Baseline vs JPEG-LS vs uncompressed for photos
-5. **Regulatory class:** documentation-only vs medical device under MDR for target markets
+5. **MDR classification** for stated intended purpose (NL/EU counsel) — drives QMS depth
 6. **Auth model:** AE-only LAN trust vs user login (OIDC/SAML) in MVP
+7. **FHIR:** confirm stay deferred until a Dutch pilot EPD explicitly needs SMART/FHIR launch (default: yes, defer)
 
 ---
 
 ## Phase priority for build start
 
-Ship value in this order: **Phase 0 → 1 → 2 → 3**, with Phase 4 work overlapping Phase 2–3 (DICOMweb spike early). Phase 5 tracks in parallel once a pilot site appears.
+Ship value in this order: **Phase 0 → 1 → 2 → 3**, with Phase 4 work overlapping Phase 2–3 (DICOMweb spike early). DPIA/MDR drafting starts in Phase 0 and hardens through Phase 5. FHIR stays off the critical path unless a pilot forces it.
 
 When Phase 0 starts, first concrete tasks:
 

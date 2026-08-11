@@ -5,19 +5,19 @@ Android clinical camera: capture photos/videos as DICOM, bind via Modality Workl
 **Android only. PACS/EHR vendor independent. No durable on-device archive after successful send.**  
 **Primary market:** Netherlands / EU (AVG, NEN 7510, MDR-aware).
 
-## Status — Phase 4
+## Status — Phase 5
 
-- Dual stack: **DIMSE** and **DICOMweb** (QIDO-RS / STOW-RS), selectable per site / MDM
-- Session tray photo + video; batch store with retry; wipe on ACK; pending queue
-- Managed Configurations, ATNA-style audit export, charset/timezone hardening
-- Draft Conformance Statement + IT deployment guide + IHE SWF/WIC notes
-- Phase 3 capture/review UX retained (system camera, markup copy, archive queue)
+- EHR identity: **FHIR R4 Patient** + **HL7 façade**, composite lookup modes
+- Barcode/Patient ID trigger, emergency / no-order path, privacy banner
+- Operator config lock + MDM keys for FHIR/HL7
+- NL/EU compliance pack drafts + optional HL7 HTTPS connector note
+- Phase 4 dual-stack PACS / ATNA retained
 
-See **[docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md)**, **[docs/deploy/IT_DEPLOYMENT_GUIDE.md](docs/deploy/IT_DEPLOYMENT_GUIDE.md)**, ADR [0003](docs/adr/0003-dual-stack-dicomweb.md).
+See **[docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md)** and **[docs/compliance/PHASE5_COMPLIANCE_PACK.md](docs/compliance/PHASE5_COMPLIANCE_PACK.md)**.
 
 ## Quick start
 
 ```bash
-./gradlew :dicom:testDebugUnitTest
+./gradlew :identity:testDebugUnitTest :dicom:testDebugUnitTest
 ./gradlew :app:assembleStagingDebug
 ```

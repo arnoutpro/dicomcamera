@@ -347,6 +347,9 @@ fun Phase3App() {
                     onPatientChange = { patient = it },
                     pacsConfigured = pacsSettings.isConfigured(),
                     hl7Configured = pacsSettings.toHl7Config().isConfigured(),
+                    fhirConfigured = pacsSettings.toFhirConfig().isConfigured(),
+                    ehrConfigured = pacsSettings.toHl7Config().isConfigured() ||
+                        pacsSettings.toFhirConfig().isConfigured(),
                     pendingCount = pendingItems.size,
                     statusNote = statusNote,
                     selectedBanner = exam?.banner,
@@ -358,18 +361,33 @@ fun Phase3App() {
                         destination = Destination.Pending
                     },
                     onOpenSettings = { selectMainTab(MainTab.Settings) },
-                    onQueryHl7 = {
+                    onQueryEhr = {
                         scope.launch {
-                            statusNote = "HL7 ADT lookup…"
-                            diagnosticLog.log("hl7_lookup_start", patient.patientId.trim())
+                            statusNote = "EHR identity lookup…"
+                            diagnosticLog.log("ehr_lookup_start", patient.patientId.trim())
                             val outcome = withContext(Dispatchers.IO) {
                                 runCatching {
-                                    nl.dicomcamera.identity.Hl7PatientDirectory(
-                                        configProvider = { pacsSettings.toHl7Config() },
+                                    val hl7 = pacsSettings.toHl7Config().takeIf { it.isConfigured() }
+                                        ?.let {
+                                            nl.dicomcamera.identity.Hl7PatientDirectory {
+                                                pacsSettings.toHl7Config()
+                                            }
+                                        }
+                                    val fhir = pacsSettings.toFhirConfig().takeIf { it.isConfigured() }
+                                        ?.let {
+                                            nl.dicomcamera.identity.FhirPatientDirectory {
+                                                pacsSettings.toFhirConfig()
+                                            }
+                                        }
+                                    nl.dicomcamera.identity.CompositePatientDirectory(
+                                        modeProvider = { pacsSettings.identityLookupMode },
+                                        hl7 = hl7,
+                                        fhir = fhir,
                                     ).findPatients(
                                         nl.dicomcamera.identity.PatientQuery(
                                             patientId = patient.patientId.trim(),
                                             patientName = patient.patientName.trim().ifBlank { null },
+                                            accessionNumber = patient.accessionNumber.trim().ifBlank { null },
                                         ),
                                     )
                                 }
@@ -377,8 +395,8 @@ fun Phase3App() {
                             outcome.onSuccess { list ->
                                 val hit = list.firstOrNull()
                                 if (hit == null) {
-                                    statusNote = "HL7: no patient found"
-                                    diagnosticLog.log("hl7_lookup", "no_patient")
+                                    statusNote = "EHR: no patient found"
+                                    diagnosticLog.log("ehr_lookup", "no_patient")
                                 } else {
                                     patient = patient.copy(
                                         patientId = hit.patientId,
@@ -387,17 +405,21 @@ fun Phase3App() {
                                         sex = hit.sex.orEmpty(),
                                     )
                                     audit.record(
-                                        "hl7_lookup",
+                                        "ehr_lookup",
                                         patientId = hit.patientId,
-                                        detail = hit.patientName,
+                                        detail = "${hit.source};${hit.patientName}",
                                     )
-                                    diagnosticLog.log("hl7_lookup", "ok ${hit.patientId}")
-                                    statusNote = "HL7: filled ${hit.patientName}"
+                                    statusNote = "EHR OK (${hit.source}): ${hit.patientId}"
+                                    diagnosticLog.log(
+                                        "ehr_lookup",
+                                        "ok ${hit.source} ${hit.patientId}",
+                                    )
                                 }
                             }.onFailure { e ->
-                                diagnosticLog.log("hl7_lookup", "failed ${e.message}")
-                                statusNote = "HL7 failed: ${e.message}"
+                                statusNote = "EHR lookup failed: ${e.message}"
+                                diagnosticLog.log("ehr_lookup", "failed ${e.message}")
                             }
+                            logUiTick++
                         }
                     },
                     onWorklistSelected = { entry: WorklistEntry ->
@@ -426,37 +448,42 @@ fun Phase3App() {
                         statusNote = ""
                         destination = Destination.Session
                     },
-                    onContinueManual = {
+                    onContinueManual = { emergency ->
                         val id = patient.patientId.trim()
+                        val name = patient.patientName.trim().ifBlank { "UNKNOWN^UNKNOWN" }
                         when {
                             id.isBlank() -> statusNote = "Patient ID is required"
                             else -> {
                                 statusNote = ""
                                 worklistHint = null
-                                val accession = patient.accessionNumber
-                                val studyDesc = patient.studyDescription
-                                patient = ManualPatientForm(
-                                    patientId = id,
-                                    patientName = "",
-                                    birthDate = "",
-                                    sex = "",
-                                    accessionNumber = accession,
-                                    studyDescription = studyDesc,
-                                )
                                 startNewSession(
                                     ExamSelection(
                                         context = PatientStudyContext(
                                             patientId = id,
-                                            patientName = "",
-                                            accessionNumber = accession.takeIf { it.isNotBlank() },
-                                            studyDescription = studyDesc.takeIf { it.isNotBlank() },
+                                            patientName = name,
+                                            patientBirthDate = patient.birthDate.trim().ifBlank { null },
+                                            patientSex = patient.sex.trim().ifBlank { null },
+                                            accessionNumber = patient.accessionNumber.trim().ifBlank { null },
+                                            studyDescription = patient.studyDescription.trim().ifBlank {
+                                                if (emergency) "Unscheduled / emergency documentation" else null
+                                            },
                                             modality = pacsSettings.modality.ifBlank { "XC" },
-                                            seriesDescription = "Clinical photo/video session",
+                                            seriesDescription = if (emergency) {
+                                                "Emergency clinical photo/video"
+                                            } else {
+                                                "Clinical photo/video session"
+                                            },
+                                            bodyPartExamined = patient.bodyPartExamined.trim().ifBlank { null },
+                                            laterality = patient.laterality.trim().ifBlank { null },
                                         ),
                                         source = ExamSource.MANUAL,
                                     ),
                                 )
-                                audit.record("select_manual", patientId = id)
+                                audit.record(
+                                    if (emergency) "select_emergency" else "select_manual",
+                                    patientId = id,
+                                    detail = name,
+                                )
                                 destination = Destination.Session
                             }
                         }
@@ -927,6 +954,8 @@ private fun WorklistTab(
     onPatientChange: (ManualPatientForm) -> Unit,
     pacsConfigured: Boolean,
     hl7Configured: Boolean,
+    fhirConfigured: Boolean,
+    ehrConfigured: Boolean,
     pendingCount: Int,
     statusNote: String,
     selectedBanner: String?,
@@ -935,9 +964,9 @@ private fun WorklistTab(
     modality: String,
     onOpenPending: () -> Unit,
     onOpenSettings: () -> Unit,
-    onQueryHl7: () -> Unit,
+    onQueryEhr: () -> Unit,
     onWorklistSelected: (WorklistEntry) -> Unit,
-    onContinueManual: () -> Unit,
+    onContinueManual: (emergency: Boolean) -> Unit,
 ) {
     var mode by remember { mutableStateOf(WorklistMode.Worklist) }
 
@@ -948,6 +977,10 @@ private fun WorklistTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        StatusBanner(
+            text = "Niet blijvend op dit apparaat — photos/videos are wiped after successful PACS store.",
+            tone = StatusTone.Info,
+        )
         SegmentedChoice(
             leftLabel = "Worklist",
             rightLabel = "Manual",
@@ -1009,45 +1042,59 @@ private fun WorklistTab(
             }
             WorklistMode.Manual -> {
                 SoftPanel {
-                    SectionLabel("HL7 ADT query")
+                    SectionLabel("EHR identity (barcode / Patient ID)")
                     Text(
-                        "Look up demographics on the hospital HL7 façade (ADT / QBP). Does not use DICOM C-ECHO.",
+                        "Scan with a keyboard-wedge barcode scanner into Patient ID, or type the ID. Then look up demographics via FHIR and/or HL7.",
                         style = MaterialTheme.typography.bodySmall,
                         color = DicomColors.Slate700,
                     )
                     DicomTextField(
                         value = patient.patientId,
-                        onValueChange = { onPatientChange(patient.copy(patientId = it)) },
-                        label = "Patient ID *",
+                        onValueChange = { onPatientChange(patient.copy(patientId = it.trim())) },
+                        label = "Patient ID / barcode *",
                     )
                     DicomTextField(
                         value = patient.patientName,
                         onValueChange = { onPatientChange(patient.copy(patientName = it)) },
                         label = "Patient Name (optional for query)",
                     )
-                    QuietOutlinedButton(
-                        text = if (hl7Configured) {
-                            "Query HL7 ADT"
-                        } else {
-                            "Query HL7 (configure in Settings)"
+                    ForestButton(
+                        text = when {
+                            ehrConfigured -> "Look up in EHR"
+                            else -> "Look up (configure FHIR/HL7 in Settings)"
                         },
-                        onClick = onQueryHl7,
+                        onClick = onQueryEhr,
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = hl7Configured && patient.patientId.isNotBlank(),
+                        enabled = ehrConfigured && patient.patientId.isNotBlank(),
                     )
-                    if (!hl7Configured) {
+                    if (!ehrConfigured) {
                         Text(
-                            "Enable Settings → HL7 demographics and set the façade URL.",
+                            "Enable Settings → EHR identity (FHIR and/or HL7).",
                             style = MaterialTheme.typography.bodySmall,
                             color = DicomColors.Slate500,
                         )
+                    } else {
+                        Text(
+                            buildString {
+                                if (fhirConfigured) append("FHIR ready")
+                                if (fhirConfigured && hl7Configured) append(" · ")
+                                if (hl7Configured) append("HL7 ready")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DicomColors.Slate700,
+                        )
                     }
+                    QuietOutlinedButton(
+                        text = "Open Settings",
+                        onClick = onOpenSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
 
                 SoftPanel {
                     SectionLabel("Patient details")
                     Text(
-                        "Edit fields after HL7 lookup, or enter everything manually.",
+                        "Edit fields after EHR lookup, or enter everything manually.",
                         style = MaterialTheme.typography.bodySmall,
                         color = DicomColors.Slate700,
                     )
@@ -1104,8 +1151,18 @@ private fun WorklistTab(
                     }
                     ForestButton(
                         text = "Continue with this patient",
-                        onClick = onContinueManual,
+                        onClick = { onContinueManual(false) },
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                    QuietOutlinedButton(
+                        text = "Emergency / no order",
+                        onClick = { onContinueManual(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Emergency creates a new study UID with an unscheduled series description when no order exists.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DicomColors.Slate500,
                     )
                 }
             }

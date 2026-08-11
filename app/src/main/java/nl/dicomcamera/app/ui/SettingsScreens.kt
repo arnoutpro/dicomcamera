@@ -41,18 +41,19 @@ import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
 import nl.dicomcamera.app.ui.theme.DicomColors
 import nl.dicomcamera.dicom.TransportMode
+import nl.dicomcamera.identity.IdentityLookupMode
 
 private enum class SettingsSection {
     Hub,
     Transport,
     LocalAe,
     RemoteDicom,
-    Hl7Demographics,
+    EhrIdentity,
     Logging,
 }
 
 /**
- * Settings hub: Transport, Local AE, Remote DICOM (PACS), HL7 demographics, Logging/ATNA.
+ * Settings hub: Transport, Local AE, Remote DICOM, EHR identity (HL7+FHIR), Logging/ATNA.
  */
 @Composable
 fun SettingsFlow(
@@ -70,7 +71,7 @@ fun SettingsFlow(
 ) {
     var section by remember { mutableStateOf(SettingsSection.Hub) }
     var draft by remember(initial) { mutableStateOf(initial) }
-    val locked = draft.managedByMdm
+    val locked = !draft.settingsEditable()
 
     SideEffect {
         onTitleChange(
@@ -79,7 +80,7 @@ fun SettingsFlow(
                 SettingsSection.Transport -> "Transport"
                 SettingsSection.LocalAe -> "Local AE"
                 SettingsSection.RemoteDicom -> "Remote DICOM"
-                SettingsSection.Hl7Demographics -> "HL7 demographics"
+                SettingsSection.EhrIdentity -> "EHR identity"
                 SettingsSection.Logging -> "Logging"
             },
         )
@@ -91,7 +92,7 @@ fun SettingsFlow(
             onOpenTransport = { section = SettingsSection.Transport },
             onOpenLocal = { section = SettingsSection.LocalAe },
             onOpenRemote = { section = SettingsSection.RemoteDicom },
-            onOpenHl7 = { section = SettingsSection.Hl7Demographics },
+            onOpenEhr = { section = SettingsSection.EhrIdentity },
             onOpenLogging = { section = SettingsSection.Logging },
             onSave = { onSave(draft) },
             connectivityStatus = connectivityStatus,
@@ -117,8 +118,9 @@ fun SettingsFlow(
             onEcho = { onEcho(draft) },
             onBack = { section = SettingsSection.Hub },
         )
-        SettingsSection.Hl7Demographics -> Hl7DemographicsSection(
+        SettingsSection.EhrIdentity -> EhrIdentitySection(
             draft = draft,
+            locked = locked,
             onChange = { draft = it },
             onBack = { section = SettingsSection.Hub },
         )
@@ -144,7 +146,7 @@ private fun SettingsHub(
     onOpenTransport: () -> Unit,
     onOpenLocal: () -> Unit,
     onOpenRemote: () -> Unit,
-    onOpenHl7: () -> Unit,
+    onOpenEhr: () -> Unit,
     onOpenLogging: () -> Unit,
     onSave: () -> Unit,
     connectivityStatus: String,
@@ -164,9 +166,12 @@ private fun SettingsHub(
             },
             tone = if (draft.isConfigured()) StatusTone.Success else StatusTone.Warn,
         )
-        if (draft.managedByMdm) {
+        if (draft.managedByMdm || draft.adminConfigLocked) {
             StatusBanner(
-                text = "Managed by MDM — PACS fields are locked.",
+                text = when {
+                    draft.managedByMdm -> "Managed by MDM — PACS/EHR fields are locked."
+                    else -> "Operator mode — config locked (admin / MDM)."
+                },
                 tone = StatusTone.Info,
             )
         }
@@ -189,9 +194,9 @@ private fun SettingsHub(
                 onClick = onOpenRemote,
             )
             SettingsNavRow(
-                title = "HL7 demographics",
-                subtitle = draft.hl7Summary(),
-                onClick = onOpenHl7,
+                title = "EHR identity",
+                subtitle = draft.identitySummary(),
+                onClick = onOpenEhr,
             )
             SettingsNavRow(
                 title = "Logging",
@@ -540,8 +545,9 @@ private fun RemoteDicomSection(
 }
 
 @Composable
-private fun Hl7DemographicsSection(
+private fun EhrIdentitySection(
     draft: PacsSettings,
+    locked: Boolean,
     onChange: (PacsSettings) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -554,11 +560,83 @@ private fun Hl7DemographicsSection(
     ) {
         QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
         ScreenTitle(
-            title = "HL7 demographics",
-            subtitle = "Query patient details via hospital HL7 façade (HTTPS). No raw MLLP on the phone.",
+            title = "EHR identity",
+            subtitle = "Resolve demographics from the EPD via FHIR and/or HL7 façade. Pixels still go to PACS only.",
         )
         SoftPanel {
-            SectionLabel("Façade")
+            SectionLabel("Lookup order")
+            listOf(
+                IdentityLookupMode.FHIR_THEN_HL7 to "FHIR first, then HL7",
+                IdentityLookupMode.HL7_THEN_FHIR to "HL7 first, then FHIR",
+                IdentityLookupMode.FHIR_ONLY to "FHIR only",
+                IdentityLookupMode.HL7_ONLY to "HL7 only",
+            ).forEach { (mode, label) ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = draft.identityLookupMode == mode,
+                            onClick = { if (!locked) onChange(draft.copy(identityLookupMode = mode)) },
+                            role = Role.RadioButton,
+                            enabled = !locked,
+                        )
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = draft.identityLookupMode == mode,
+                        onClick = null,
+                        enabled = !locked,
+                        colors = RadioButtonDefaults.colors(selectedColor = DicomColors.Forest),
+                    )
+                    Text(label, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+        }
+        SoftPanel {
+            SectionLabel("FHIR R4")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (draft.fhirEnabled) "FHIR lookup enabled" else "FHIR lookup disabled",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Switch(
+                    checked = draft.fhirEnabled,
+                    onCheckedChange = { if (!locked) onChange(draft.copy(fhirEnabled = it)) },
+                    enabled = !locked,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = DicomColors.Forest,
+                        checkedThumbColor = DicomColors.White,
+                        uncheckedTrackColor = DicomColors.Hairline,
+                        uncheckedThumbColor = DicomColors.Slate500,
+                    ),
+                )
+            }
+            DicomTextField(
+                value = draft.fhirBaseUrl,
+                onValueChange = { if (!locked) onChange(draft.copy(fhirBaseUrl = it)) },
+                label = "FHIR base URL",
+                enabled = !locked,
+            )
+            Text(
+                "Example: https://ehr.hospital.local/fhir — GET Patient?identifier=",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            DicomTextField(
+                value = draft.fhirBearerToken,
+                onValueChange = { if (!locked) onChange(draft.copy(fhirBearerToken = it)) },
+                label = "Bearer token (optional)",
+                enabled = !locked,
+            )
+            Text(draft.fhirSummary(), style = MaterialTheme.typography.bodyMedium)
+        }
+        SoftPanel {
+            SectionLabel("HL7 façade")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -570,7 +648,8 @@ private fun Hl7DemographicsSection(
                 )
                 Switch(
                     checked = draft.hl7Enabled,
-                    onCheckedChange = { onChange(draft.copy(hl7Enabled = it)) },
+                    onCheckedChange = { if (!locked) onChange(draft.copy(hl7Enabled = it)) },
+                    enabled = !locked,
                     colors = SwitchDefaults.colors(
                         checkedTrackColor = DicomColors.Forest,
                         checkedThumbColor = DicomColors.White,
@@ -581,42 +660,57 @@ private fun Hl7DemographicsSection(
             }
             DicomTextField(
                 value = draft.hl7BaseUrl,
-                onValueChange = { onChange(draft.copy(hl7BaseUrl = it)) },
+                onValueChange = { if (!locked) onChange(draft.copy(hl7BaseUrl = it)) },
                 label = "Façade base URL",
+                enabled = !locked,
             )
             Text(
-                "Example: https://ehr-gw.hospital.local/hl7 — app calls GET …/patients?patientId=",
+                "HTTPS only — no raw MLLP on the phone. See docs/connector for optional on-prem bridge.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
             DicomTextField(
                 value = draft.hl7BearerToken,
-                onValueChange = { onChange(draft.copy(hl7BearerToken = it)) },
+                onValueChange = { if (!locked) onChange(draft.copy(hl7BearerToken = it)) },
                 label = "Bearer token (optional)",
+                enabled = !locked,
             )
+            Text(draft.hl7Summary(), style = MaterialTheme.typography.bodyMedium)
         }
         SoftPanel {
-            SectionLabel("Usage")
+            SectionLabel("Operator lock")
             Text(
-                "On the Worklist tab, enter a Patient ID and tap Query HL7 to fill name, DOB, and sex.",
+                "When locked, operators can capture but cannot change PACS/EHR settings (also set via MDM).",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
-            Text(
-                "Ping and archive tests in Remote DICOM do not apply here — HL7 uses HTTPS, not DIMSE.",
-                style = MaterialTheme.typography.bodySmall,
-                color = DicomColors.Slate700,
-            )
-            Text(
-                draft.hl7Summary(),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                "Tap Save all settings on the Settings hub to persist.",
-                style = MaterialTheme.typography.bodySmall,
-                color = DicomColors.Slate500,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (draft.adminConfigLocked) "Config locked for operators" else "Config editable",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Switch(
+                    checked = draft.adminConfigLocked,
+                    onCheckedChange = { if (!draft.managedByMdm) onChange(draft.copy(adminConfigLocked = it)) },
+                    enabled = !draft.managedByMdm,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = DicomColors.Forest,
+                        checkedThumbColor = DicomColors.White,
+                        uncheckedTrackColor = DicomColors.Hairline,
+                        uncheckedThumbColor = DicomColors.Slate500,
+                    ),
+                )
+            }
         }
+        Text(
+            "Tap Save all settings on the Settings hub to persist.",
+            style = MaterialTheme.typography.bodySmall,
+            color = DicomColors.Slate500,
+        )
     }
 }
 

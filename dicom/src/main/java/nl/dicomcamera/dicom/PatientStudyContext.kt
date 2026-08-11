@@ -12,6 +12,7 @@ data class PatientStudyContext(
     val accessionNumber: String? = null,
     val studyDescription: String? = null,
     val studyInstanceUid: String? = null,
+    val seriesInstanceUid: String? = null,
     val seriesDescription: String? = null,
     val modality: String = "XC",
 )

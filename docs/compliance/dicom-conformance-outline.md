@@ -16,7 +16,7 @@ Formal statement will be published before external pilots. This outline tracks S
 |---|---|---|
 | Verification SOP Class | SCU | 0 |
 | Secondary Capture Image Storage | SCU (Storage) | 0 |
-| VL Photographic Image Storage | SCU | 1 (preferred encoding) |
+| VL Photographic Image Storage | SCU (Storage) | 1 (preferred encoding) |
 | Basic Worklist Management (C-FIND) | SCU | 2 |
 | Study Root Query/Retrieve Information Model – FIND | SCU | 2 |
 | Encapsulated video / multi-frame (TBD) | SCU | 3 |

@@ -189,6 +189,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Safest useful loop: identify patient manually → photo → DICOM → PACS → wipe.
 
+**Status:** Implemented on branch `cursor/phase-1-store-path-cbc8`.
+
 - PACS node settings UI (host, port, called/calling AE Title, TLS toggle)
 - C-ECHO connectivity test
 - Manual demographics form (Patient ID, Name, DOB, Sex, Accession optional)

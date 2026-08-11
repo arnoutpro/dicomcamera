@@ -1,6 +1,9 @@
 package nl.dicomcamera.dicom
 
 import com.google.common.truth.Truth.assertThat
+import org.dcm4che3.data.Tag
+import org.dcm4che3.data.UID
+import org.dcm4che3.io.DicomInputStream
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -25,27 +28,38 @@ class PacsEchoStoreSpikeTest {
     }
 
     @Test
-    fun echo_and_store_jpeg_secondary_capture_then_wipe() {
+    fun echo_and_store_vl_photographic_then_wipe() {
         val staging = SecureStaging(temp.newFolder("staging"))
         val jpeg = minimalJpegBytes()
-        val dicomFile = staging.createStagingFile("sc", "photo.dcm")
+        val dicomFile = staging.createStagingFile("vl", "photo.dcm")
 
-        val encoded = SecondaryCaptureEncoder().encodeJpegToFile(
+        val encoded = PhotographicImageEncoder().encodeJpegToFile(
             jpegBytes = jpeg,
             context = PatientStudyContext(
                 patientId = "NL-12345",
                 patientName = "TEST^PATIENT",
+                patientBirthDate = "19800101",
                 patientSex = "O",
                 accessionNumber = "ACC001",
-                studyDescription = "Phase0 spike",
+                studyDescription = "Phase1 store path",
             ),
             rows = 16,
             columns = 16,
             outputFile = dicomFile,
         )
 
+        assertThat(encoded.sopClassUid).isEqualTo(UID.VLPhotographicImageStorage)
         assertThat(dicomFile.exists()).isTrue()
-        assertThat(dicomFile.length()).isGreaterThan(0)
+
+        DicomInputStream(dicomFile).use { input ->
+            input.readFileMetaInformation()
+            val ds = input.readDataset()
+            assertThat(ds.getString(Tag.PatientID)).isEqualTo("NL-12345")
+            assertThat(ds.getString(Tag.PatientBirthDate)).isEqualTo("19800101")
+            assertThat(ds.getString(Tag.PatientSex)).isEqualTo("O")
+            assertThat(ds.getString(Tag.AccessionNumber)).isEqualTo("ACC001")
+            assertThat(ds.getString(Tag.Modality)).isEqualTo("XC")
+        }
 
         val node = DicomNode(
             host = "127.0.0.1",
@@ -55,9 +69,7 @@ class PacsEchoStoreSpikeTest {
         )
 
         PacsClient(node).use { client ->
-            val echo = client.echo()
-            assertThat(echo).isEqualTo(EchoResult.Success)
-
+            assertThat(client.echo()).isEqualTo(EchoResult.Success)
             val store = client.store(dicomFile)
             assertThat(store).isInstanceOf(StoreResult.Success::class.java)
             val sopUid = (store as StoreResult.Success).sopInstanceUid
@@ -65,10 +77,42 @@ class PacsEchoStoreSpikeTest {
             assertThat(scp.readPatientId(sopUid)).isEqualTo("NL-12345")
         }
 
-        val wipe = staging.wipe(dicomFile)
-        assertThat(wipe).isEqualTo(WipeResult.Wiped)
+        assertThat(staging.wipe(dicomFile)).isEqualTo(WipeResult.Wiped)
         assertThat(dicomFile.exists()).isFalse()
-        assertThat(staging.listStagingFiles()).isEmpty()
+    }
+
+    @Test
+    fun pending_queue_retry_and_discard() {
+        val staging = SecureStaging(temp.newFolder("staging"))
+        val pending = PendingStoreQueue(temp.newFolder("pending"), staging)
+        val jpeg = minimalJpegBytes()
+        val dicomFile = staging.createStagingFile("vl", "photo.dcm")
+        PhotographicImageEncoder().encodeJpegToFile(
+            jpegBytes = jpeg,
+            context = PatientStudyContext(patientId = "P1", patientName = "A^B"),
+            rows = 16,
+            columns = 16,
+            outputFile = dicomFile,
+        )
+
+        val item = pending.enqueue(
+            dicomFile = dicomFile,
+            rawFile = null,
+            patientId = "P1",
+            patientName = "A^B",
+            error = "C-STORE failed: offline",
+        )
+        assertThat(dicomFile.exists()).isFalse()
+        assertThat(pending.list()).hasSize(1)
+
+        PacsClient(
+            DicomNode("127.0.0.1", scp.boundPort, "TESTPACS", "DICOMCAM"),
+        ).use { client ->
+            val store = client.store(item.dicomFile)
+            assertThat(store).isInstanceOf(StoreResult.Success::class.java)
+        }
+        pending.markStoredAndWipe(item.id)
+        assertThat(pending.list()).isEmpty()
     }
 
     @Test
@@ -85,7 +129,6 @@ class PacsEchoStoreSpikeTest {
         assertThat(staging.listStagingFiles()).isEmpty()
     }
 
-    /** Tiny valid 16×16 JPEG fixture (no AWT — Android unit tests lack java.desktop). */
     private fun minimalJpegBytes(): ByteArray {
         val stream = javaClass.getResourceAsStream("/sample.jpg")
             ?: error("Missing test resource /sample.jpg")

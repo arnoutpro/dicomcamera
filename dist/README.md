@@ -4,7 +4,7 @@ Sideload these **debug-signed** APKs for UI smoke testing only — not for clini
 
 | File | Flavor | Notes |
 |---|---|---|
-| `dicomcamera-staging-debug.apk` | staging | Empty PACS defaults; fill in host/AE in-app |
+| `dicomcamera-staging-debug.apk` | staging (Phase 1) | Empty PACS defaults; configure in-app (gear). Manual patient → capture → review → store → wipe. |
 
 ```bash
 adb install -r dist/dicomcamera-staging-debug.apk

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.DicomCamera" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.DicomCamera" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/rebost_chrome</item>
+        <item name="android:navigationBarColor">@color/rebost_linen</item>
+        <item name="android:windowBackground">@color/rebost_linen</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>

@@ -21,6 +21,7 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,20 +38,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +60,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -81,6 +80,20 @@ import nl.dicomcamera.app.session.SessionItem
 import nl.dicomcamera.app.session.SessionItemStatus
 import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.settings.SettingsRepository
+import nl.dicomcamera.app.ui.components.BrandWordmark
+import nl.dicomcamera.app.ui.components.ChromeTopBar
+import nl.dicomcamera.app.ui.components.DicomTextField
+import nl.dicomcamera.app.ui.components.ForestButton
+import nl.dicomcamera.app.ui.components.MetaChip
+import nl.dicomcamera.app.ui.components.QuietOutlinedButton
+import nl.dicomcamera.app.ui.components.ScreenTitle
+import nl.dicomcamera.app.ui.components.SectionLabel
+import nl.dicomcamera.app.ui.components.SoftPanel
+import nl.dicomcamera.app.ui.components.StatusBanner
+import nl.dicomcamera.app.ui.components.StatusTone
+import nl.dicomcamera.app.ui.theme.DicomColors
+import nl.dicomcamera.app.ui.theme.DicomShapes
+import nl.dicomcamera.app.ui.theme.DicomType
 import nl.dicomcamera.dicom.AuditLog
 import nl.dicomcamera.dicom.EchoResult
 import nl.dicomcamera.dicom.PacsClient
@@ -105,7 +118,6 @@ private enum class Destination {
     Pending,
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Phase3App() {
     val context = LocalContext.current
@@ -158,34 +170,48 @@ fun Phase3App() {
         }
     }
 
+    val title = when (destination) {
+        Destination.Patient -> "DICOM Camera"
+        Destination.Settings -> "PACS settings"
+        Destination.Worklist -> "Modality worklist"
+        Destination.AppendStudy -> "Append to study"
+        Destination.Capture -> "Session capture"
+        Destination.Sending -> "Sending"
+        Destination.Result -> "Result"
+        Destination.Pending -> "Pending uploads"
+    }
+
     Scaffold(
+        containerColor = DicomColors.Linen,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when (destination) {
-                            Destination.Patient -> "DICOM Camera"
-                            Destination.Settings -> "PACS settings"
-                            Destination.Worklist -> "Modality worklist"
-                            Destination.AppendStudy -> "Append to study"
-                            Destination.Capture -> "Session capture"
-                            Destination.Sending -> "Sending"
-                            Destination.Result -> "Result"
-                            Destination.Pending -> "Pending uploads"
-                        },
-                    )
+            ChromeTopBar(
+                title = title,
+                subtitle = when (destination) {
+                    Destination.Patient -> "Clinical capture"
+                    Destination.Capture -> exam?.banner
+                    else -> null
                 },
-                navigationIcon = {
-                    if (destination != Destination.Patient) {
+                navigationIcon = if (destination != Destination.Patient) {
+                    {
                         IconButton(onClick = { goBack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = DicomColors.Forest,
+                            )
                         }
                     }
+                } else {
+                    null
                 },
                 actions = {
                     if (destination == Destination.Patient) {
                         IconButton(onClick = { destination = Destination.Settings }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = DicomColors.Forest,
+                            )
                         }
                     }
                 },
@@ -196,7 +222,7 @@ fun Phase3App() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(MaterialTheme.colorScheme.background),
+                .background(DicomColors.Linen),
         ) {
             when (destination) {
                 Destination.Patient -> PatientScreen(
@@ -444,20 +470,30 @@ fun Phase3App() {
 @Composable
 private fun SendingScreen(progress: String) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator()
-        Text(
-            text = progress.ifBlank { "Encoding and C-STORE to PACS..." },
-            modifier = Modifier.padding(top = 16.dp),
-        )
-        LinearProgressIndicator(
-            modifier = Modifier
-                .padding(top = 8.dp)
-                .fillMaxWidth(0.6f),
-        )
+        SoftPanel {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                CircularProgressIndicator(color = DicomColors.Forest)
+                Text(
+                    text = progress.ifBlank { "Encoding and C-STORE to PACS..." },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = DicomColors.Teal,
+                    trackColor = DicomColors.Hairline,
+                )
+            }
+        }
     }
 }
 
@@ -479,116 +515,134 @@ private fun PatientScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(
-            text = "Phase 3 — session tray, photo + video → batch C-STORE → wipe",
-            style = MaterialTheme.typography.bodyMedium,
+        BrandWordmark(size = 22)
+        ScreenTitle(
+            title = "Start a capture session",
+            subtitle = "Bind the exam, then capture photo and video for batch C-STORE.",
         )
+
         if (!pacsConfigured) {
-            Text(
+            StatusBanner(
                 text = "PACS not configured yet. Open settings (gear) first.",
-                color = MaterialTheme.colorScheme.secondary,
+                tone = StatusTone.Warn,
             )
         }
         if (!selectedBanner.isNullOrBlank()) {
-            Text(
-                text = "Selected: $selectedBanner",
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.titleSmall,
-            )
-        }
-        Button(onClick = onOpenWorklist, modifier = Modifier.fillMaxWidth()) {
-            Text("Modality worklist")
-        }
-        Button(onClick = onOpenAppend, modifier = Modifier.fillMaxWidth()) {
-            Text("Append to existing study")
-        }
-        Text("Or enter demographics manually:", style = MaterialTheme.typography.labelLarge)
-        OutlinedTextField(
-            value = patient.patientId,
-            onValueChange = { onPatientChange(patient.copy(patientId = it)) },
-            label = { Text("Patient ID *") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = patient.patientName,
-            onValueChange = { onPatientChange(patient.copy(patientName = it)) },
-            label = { Text("Patient Name * (FAMILY^GIVEN)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = patient.birthDate,
-            onValueChange = { onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8))) },
-            label = { Text("Birth date (YYYYMMDD)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        Text(text = "Sex", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf("" to "-", "M" to "M", "F" to "F", "O" to "O").forEach { (value, label) ->
-                Row(
-                    Modifier.selectable(
-                        selected = patient.sex == value,
-                        onClick = { onPatientChange(patient.copy(sex = value)) },
-                        role = Role.RadioButton,
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = patient.sex == value, onClick = null)
-                    Text(text = label, modifier = Modifier.padding(end = 8.dp))
-                }
-            }
-        }
-        OutlinedTextField(
-            value = patient.accessionNumber,
-            onValueChange = { onPatientChange(patient.copy(accessionNumber = it)) },
-            label = { Text("Accession (optional)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = patient.studyDescription,
-            onValueChange = { onPatientChange(patient.copy(studyDescription = it)) },
-            label = { Text("Study description (optional)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = patient.bodyPartExamined,
-            onValueChange = { onPatientChange(patient.copy(bodyPartExamined = it.uppercase())) },
-            label = { Text("Body part (e.g. HAND, FOOT)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        Text(text = "Laterality", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf("" to "-", "L" to "L", "R" to "R", "U" to "U").forEach { (value, label) ->
-                Row(
-                    Modifier.selectable(
-                        selected = patient.laterality == value,
-                        onClick = { onPatientChange(patient.copy(laterality = value)) },
-                        role = Role.RadioButton,
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = patient.laterality == value, onClick = null)
-                    Text(text = label, modifier = Modifier.padding(end = 8.dp))
-                }
-            }
-        }
-        Button(onClick = onContinueManual, modifier = Modifier.fillMaxWidth()) {
-            Text("Continue with manual patient")
-        }
-        if (pendingCount > 0) {
-            OutlinedButton(onClick = onOpenPending, modifier = Modifier.fillMaxWidth()) {
-                Text("Pending uploads ($pendingCount)")
-            }
+            StatusBanner(text = "Selected: $selectedBanner", tone = StatusTone.Info)
         }
         if (statusNote.isNotBlank()) {
-            Text(statusNote)
+            StatusBanner(text = statusNote, tone = StatusTone.Info)
+        }
+
+        SoftPanel {
+            SectionLabel("Path of care")
+            ForestButton(
+                text = "Modality worklist",
+                onClick = onOpenWorklist,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            QuietOutlinedButton(
+                text = "Append to existing study",
+                onClick = onOpenAppend,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        SoftPanel {
+            SectionLabel("Manual demographics")
+            DicomTextField(
+                value = patient.patientId,
+                onValueChange = { onPatientChange(patient.copy(patientId = it)) },
+                label = "Patient ID *",
+            )
+            DicomTextField(
+                value = patient.patientName,
+                onValueChange = { onPatientChange(patient.copy(patientName = it)) },
+                label = "Patient Name * (FAMILY^GIVEN)",
+            )
+            DicomTextField(
+                value = patient.birthDate,
+                onValueChange = {
+                    onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
+                },
+                label = "Birth date (YYYYMMDD)",
+            )
+            SectionLabel("Sex")
+            ChoiceRow(
+                options = listOf("" to "-", "M" to "M", "F" to "F", "O" to "O"),
+                selected = patient.sex,
+                onSelect = { onPatientChange(patient.copy(sex = it)) },
+            )
+            DicomTextField(
+                value = patient.accessionNumber,
+                onValueChange = { onPatientChange(patient.copy(accessionNumber = it)) },
+                label = "Accession (optional)",
+            )
+            DicomTextField(
+                value = patient.studyDescription,
+                onValueChange = { onPatientChange(patient.copy(studyDescription = it)) },
+                label = "Study description (optional)",
+            )
+            DicomTextField(
+                value = patient.bodyPartExamined,
+                onValueChange = { onPatientChange(patient.copy(bodyPartExamined = it.uppercase())) },
+                label = "Body part (e.g. HAND, FOOT)",
+            )
+            SectionLabel("Laterality")
+            ChoiceRow(
+                options = listOf("" to "-", "L" to "L", "R" to "R", "U" to "U"),
+                selected = patient.laterality,
+                onSelect = { onPatientChange(patient.copy(laterality = it)) },
+            )
+            ForestButton(
+                text = "Continue with manual patient",
+                onClick = onContinueManual,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        if (pendingCount > 0) {
+            QuietOutlinedButton(
+                text = "Pending uploads ($pendingCount)",
+                onClick = onOpenPending,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChoiceRow(
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        options.forEach { (value, label) ->
+            Row(
+                Modifier.selectable(
+                    selected = selected == value,
+                    onClick = { onSelect(value) },
+                    role = Role.RadioButton,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = selected == value,
+                    onClick = null,
+                    colors = RadioButtonDefaults.colors(
+                        selectedColor = DicomColors.Forest,
+                        unselectedColor = DicomColors.Slate400,
+                    ),
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
         }
     }
 }
@@ -606,59 +660,81 @@ private fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        OutlinedTextField(
-            value = draft.host,
-            onValueChange = { draft = draft.copy(host = it) },
-            label = { Text("PACS host") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
+        ScreenTitle(
+            title = "PACS connection",
+            subtitle = "DIMSE endpoint used for worklist, append, and C-STORE.",
         )
-        OutlinedTextField(
-            value = draft.port.toString(),
-            onValueChange = { text ->
-                draft = draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port)
-            },
-            label = { Text("PACS port") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = draft.calledAeTitle,
-            onValueChange = { draft = draft.copy(calledAeTitle = it) },
-            label = { Text("Called AE Title") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = draft.callingAeTitle,
-            onValueChange = { draft = draft.copy(callingAeTitle = it) },
-            label = { Text("Calling AE Title") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        Text(text = "DICOM TLS", style = MaterialTheme.typography.labelLarge)
-        Text(
-            text = "Uses system trust store; hospital CA install via MDM later.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(if (draft.useTls) "TLS enabled" else "TLS disabled")
-            Switch(checked = draft.useTls, onCheckedChange = { draft = draft.copy(useTls = it) })
+        SoftPanel {
+            SectionLabel("Endpoint")
+            DicomTextField(
+                value = draft.host,
+                onValueChange = { draft = draft.copy(host = it) },
+                label = "PACS host",
+            )
+            DicomTextField(
+                value = draft.port.toString(),
+                onValueChange = { text ->
+                    draft = draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port)
+                },
+                label = "PACS port",
+            )
+            DicomTextField(
+                value = draft.calledAeTitle,
+                onValueChange = { draft = draft.copy(calledAeTitle = it) },
+                label = "Called AE Title",
+            )
+            DicomTextField(
+                value = draft.callingAeTitle,
+                onValueChange = { draft = draft.copy(callingAeTitle = it) },
+                label = "Calling AE Title",
+            )
         }
-        OutlinedButton(onClick = { onEcho(draft) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Test C-ECHO")
-        }
-        Button(onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Save settings")
-        }
-        if (echoStatus.isNotBlank()) {
-            Text(echoStatus)
+        SoftPanel {
+            SectionLabel("DICOM TLS")
+            Text(
+                text = "Uses system trust store; hospital CA install via MDM later.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (draft.useTls) "TLS enabled" else "TLS disabled",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Switch(
+                    checked = draft.useTls,
+                    onCheckedChange = { draft = draft.copy(useTls = it) },
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = DicomColors.Forest,
+                        checkedThumbColor = DicomColors.White,
+                        uncheckedTrackColor = DicomColors.Hairline,
+                        uncheckedThumbColor = DicomColors.Slate500,
+                    ),
+                )
+            }
+            QuietOutlinedButton(
+                text = "Test C-ECHO",
+                onClick = { onEcho(draft) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ForestButton(
+                text = "Save settings",
+                onClick = { onSave(draft) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (echoStatus.isNotBlank()) {
+                val tone = when {
+                    echoStatus.contains("OK") -> StatusTone.Success
+                    echoStatus.contains("failed", ignoreCase = true) -> StatusTone.Error
+                    else -> StatusTone.Info
+                }
+                StatusBanner(text = echoStatus, tone = tone)
+            }
         }
     }
 }
@@ -692,31 +768,38 @@ private fun CaptureSessionScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = patientBanner,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = "Confirm patient. Capture multiple photos/videos, then Send all.",
-            style = MaterialTheme.typography.bodySmall,
-        )
+        SoftPanel(
+            background = DicomColors.TealSoft,
+            border = DicomColors.Teal.copy(alpha = 0.35f),
+        ) {
+            SectionLabel("Confirm patient", color = DicomColors.Forest)
+            Text(
+                text = patientBanner,
+                style = MaterialTheme.typography.titleMedium.copy(color = DicomColors.Forest),
+            )
+            Text(
+                text = "Capture multiple photos/videos, then Send all.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
 
         if (!hasCameraPermission) {
-            Button(
+            ForestButton(
+                text = "Grant camera permission",
                 onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                 modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Grant camera permission")
-            }
+            )
         } else {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp),
+                    .height(280.dp)
+                    .clip(DicomShapes.Panel)
+                    .border(1.dp, DicomColors.Hairline, DicomShapes.Panel),
             ) {
                 SessionCameraPreview(
                     onReady = { image, video ->
@@ -729,13 +812,14 @@ private fun CaptureSessionScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Button(
+                ForestButton(
+                    text = "Photo",
                     onClick = {
-                        if (isRecording) return@Button
+                        if (isRecording) return@ForestButton
                         val capture = imageCapture
                         if (capture == null) {
                             error = "Camera not ready"
-                            return@Button
+                            return@ForestButton
                         }
                         error = null
                         val rawFile = staging.createStagingFile("raw", "jpg")
@@ -765,21 +849,20 @@ private fun CaptureSessionScreen(
                     },
                     enabled = !isRecording,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text("Photo")
-                }
-                Button(
+                )
+                ForestButton(
+                    text = if (isRecording) "Stop video" else "Record video",
                     onClick = {
                         val capture = videoCapture
                         if (capture == null) {
                             error = "Video not ready"
-                            return@Button
+                            return@ForestButton
                         }
                         if (isRecording) {
                             activeRecording?.stop()
                             activeRecording = null
                             isRecording = false
-                            return@Button
+                            return@ForestButton
                         }
                         error = null
                         val rawFile = staging.createStagingFile("raw", "mp4")
@@ -812,41 +895,71 @@ private fun CaptureSessionScreen(
                                 }
                             }
                     },
+                    containerColor = if (isRecording) DicomColors.Rose else DicomColors.ForestMid,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (isRecording) "Stop video" else "Record video")
-                }
+                )
             }
         }
 
-        Text(
-            text = "Session tray (${session.items.size})",
-            style = MaterialTheme.typography.titleSmall,
-        )
-        if (session.items.isEmpty()) {
-            Text("No captures yet.", style = MaterialTheme.typography.bodySmall)
-        } else {
+        SoftPanel {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                session.items.forEach { item ->
-                    Column(
-                        modifier = Modifier
-                            .width(140.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text("${item.label} · ${item.status.name}")
-                        item.error?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                        }
-                        if (item.status != SessionItemStatus.STORED) {
-                            OutlinedButton(onClick = { onDiscardItem(item.id) }) {
-                                Text("Remove")
+                SectionLabel("Session tray")
+                MetaChip(text = "${session.items.size} item(s)")
+            }
+            if (session.items.isEmpty()) {
+                Text("No captures yet.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    session.items.forEach { item ->
+                        Column(
+                            modifier = Modifier
+                                .width(148.dp)
+                                .clip(DicomShapes.Control)
+                                .background(DicomColors.White)
+                                .border(1.dp, DicomColors.Hairline, DicomShapes.Control)
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                item.label,
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            MetaChip(
+                                text = item.status.name,
+                                background = when (item.status) {
+                                    SessionItemStatus.STORED -> DicomColors.TealSoft
+                                    SessionItemStatus.FAILED -> DicomColors.RoseSoft
+                                    else -> DicomColors.GoldSoft
+                                },
+                                foreground = when (item.status) {
+                                    SessionItemStatus.STORED -> DicomColors.ForestMid
+                                    SessionItemStatus.FAILED -> DicomColors.Rose
+                                    else -> DicomColors.GoldInk
+                                },
+                                mono = true,
+                            )
+                            item.error?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DicomColors.Rose,
+                                )
+                            }
+                            if (item.status != SessionItemStatus.STORED) {
+                                QuietOutlinedButton(
+                                    text = "Remove",
+                                    onClick = { onDiscardItem(item.id) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
                     }
@@ -854,21 +967,19 @@ private fun CaptureSessionScreen(
             }
         }
 
-        Button(
+        ForestButton(
+            text = "Send all (${session.pendingSendCount})",
             onClick = onSendAll,
             enabled = session.pendingSendCount > 0 && !isRecording,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Send all (${session.pendingSendCount})")
-        }
-        OutlinedButton(
+        )
+        QuietOutlinedButton(
+            text = "Discard session",
             onClick = onDiscardSession,
             enabled = !isRecording,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Discard session")
-        }
-        error?.let { Text(text = it, color = MaterialTheme.colorScheme.error) }
+        )
+        error?.let { StatusBanner(text = it, tone = StatusTone.Error) }
     }
 }
 
@@ -949,26 +1060,49 @@ private fun ResultScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(
-            text = if (success) "Batch stored and wiped locally" else "Batch incomplete — check pending / session",
-            style = MaterialTheme.typography.titleLarge,
-            color = if (success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-        )
-        Text(message)
-        Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
-            Text("Done")
+        SoftPanel(
+            background = if (success) DicomColors.TealSoft else DicomColors.GoldSoft,
+            border = if (success) {
+                DicomColors.ForestMid.copy(alpha = 0.35f)
+            } else {
+                DicomColors.Gold.copy(alpha = 0.4f)
+            },
+        ) {
+            SectionLabel(
+                if (success) "Success" else "Incomplete",
+                color = if (success) DicomColors.ForestMid else DicomColors.GoldInk,
+            )
+            Text(
+                text = if (success) {
+                    "Batch stored and wiped locally"
+                } else {
+                    "Batch incomplete — check pending / session"
+                },
+                style = MaterialTheme.typography.titleLarge,
+                color = if (success) DicomColors.Forest else DicomColors.GoldInk,
+            )
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = DicomType.Mono,
+            )
         }
+        ForestButton(text = "Done", onClick = onDone, modifier = Modifier.fillMaxWidth())
         if (remainingInSession > 0) {
-            OutlinedButton(onClick = onBackToSession, modifier = Modifier.fillMaxWidth()) {
-                Text("Back to session ($remainingInSession left)")
-            }
+            QuietOutlinedButton(
+                text = "Back to session ($remainingInSession left)",
+                onClick = onBackToSession,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         if (!success || pendingCount > 0) {
-            OutlinedButton(onClick = onPending, modifier = Modifier.fillMaxWidth()) {
-                Text("View pending ($pendingCount)")
-            }
+            QuietOutlinedButton(
+                text = "View pending ($pendingCount)",
+                onClick = onPending,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -987,30 +1121,42 @@ private fun PendingScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        ScreenTitle(
+            title = "Pending uploads",
+            subtitle = "Retry failed C-STORE jobs or discard local copies.",
+        )
         if (items.isEmpty()) {
-            Text("No pending uploads.")
+            SoftPanel {
+                Text("No pending uploads.", style = MaterialTheme.typography.bodyMedium)
+            }
         }
         items.forEach { item ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+            SoftPanel {
                 Text(
                     text = "${item.patientId} · ${item.patientName}",
                     style = MaterialTheme.typography.titleMedium,
                 )
-                Text(text = item.lastError, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = item.lastError,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = DicomType.Mono,
+                    color = DicomColors.Rose,
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onRetry(item) }) { Text("Retry") }
-                    OutlinedButton(onClick = { onDiscard(item) }) { Text("Discard") }
+                    ForestButton(
+                        text = "Retry",
+                        onClick = { onRetry(item) },
+                        compact = true,
+                    )
+                    QuietOutlinedButton(
+                        text = "Discard",
+                        onClick = { onDiscard(item) },
+                    )
                 }
             }
         }
         if (statusNote.isNotBlank()) {
-            Text(statusNote)
+            StatusBanner(text = statusNote, tone = StatusTone.Info)
         }
     }
 }

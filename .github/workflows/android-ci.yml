@@ -20,5 +20,13 @@ jobs:
         run: chmod +x gradlew
       - name: Unit tests
         run: ./gradlew :dicom:testDebugUnitTest :identity:testDebugUnitTest --stacktrace
-      - name: Assemble dev debug
-        run: ./gradlew :app:assembleDevDebug --stacktrace
+      - name: Assemble debug APKs
+        run: ./gradlew :app:assembleDevDebug :app:assembleStagingDebug --stacktrace
+      - name: Upload debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicomcamera-debug-apks
+          path: |
+            app/build/outputs/apk/dev/debug/*.apk
+            app/build/outputs/apk/staging/debug/*.apk
+          if-no-files-found: error

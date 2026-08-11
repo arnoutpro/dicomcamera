@@ -1,0 +1,257 @@
+# DICOM Camera (Android) — Product Plan
+
+Vendor-independent Android app for clinical photo/video documentation: capture at the point of care, bind to the correct patient/order via DICOM Worklist or PACS query, store to PACS, then purge local copies.
+
+## Positioning
+
+Alternatives researched:
+
+| | Raster DICOM Camera | Alphatron / JiveX PhotoApp | This product |
+|---|---|---|---|
+| Platforms | iOS-first (Android mentioned) | iOS + Android | **Android only (MVP)** |
+| PACS | DICOM-compatible | PACS-independent; deep JiveX integration | **Strict vendor independence** (DIMSE + DICOMweb) |
+| Storage | Offline queue + sync | Encrypted; not in device gallery; send to PACS | **No durable local archive; ephemeral until C-STORE/STOW success, then wipe** |
+| Workflows | Query / capture / upload-from-photos | Planned (EPD order) + unplanned | **MWL + PACS query to append to existing exam** |
+| Media | Images (+ processing/annotation) | Medical photos | **Photos and videos** |
+
+Differentiators for MVP:
+
+1. Android-first, hospital MDM deployable
+2. True PACS/EHR vendor independence (standard DICOM/HL7/IHE only)
+3. Append-to-existing-study as a first-class workflow
+4. Zero residual PHI on device after successful send
+
+---
+
+## MVP scope (must ship)
+
+- [ ] Connect to PACS for **Query/Retrieve (QR)** and **Store**
+- [ ] **DICOM Modality Worklist** (MWL)
+- [ ] Capture **photos and videos**
+- [ ] **EHR- and PACS-vendor independent**
+- [ ] **No local storage after successful send to PACS**
+- [ ] **Query PACS and add additional photos/videos to a current order/exam**
+
+Out of MVP (explicitly later): iOS, annotation/markup suite, offline long-lived queues, deep proprietary EHR UI plugins, advanced image processing.
+
+---
+
+## Standards & compliance map
+
+### DICOM (PS3)
+
+| Capability | Service / SOP | Role |
+|---|---|---|
+| Connectivity check | Verification (C-ECHO) | SCU |
+| Worklist | Basic Worklist Management (C-FIND) | SCU |
+| Study/patient query | Query/Retrieve – FIND (Study Root) | SCU |
+| Optional retrieve | C-MOVE / C-GET or WADO-RS | SCU (metadata/context only in MVP) |
+| Store images/video | Storage (C-STORE) and/or STOW-RS | SCU |
+| Encoding | VL Photographic Image, Secondary Capture, Multi-frame / Encapsulated Video as applicable | Creator |
+
+Key identity tags to preserve when appending to an exam: Patient ID, Study Instance UID, Accession Number, Requested Procedure ID, Scheduled Procedure Step ID; generate new Series Instance UID + SOP Instance UIDs for new captures.
+
+### HL7
+
+- App does **not** need to speak raw HL7 v2 for MVP if the site’s RIS/broker exposes **MWL**.
+- Design for future: HL7 v2 ADT/ORM awareness via broker, and/or **HL7 FHIR** (`Patient`, `ServiceRequest`, `ImagingStudy`) for modern EHR launch.
+- Keep demographics source-of-truth at RIS/EHR; app is a modality, not an MPI.
+
+### IHE (target actors)
+
+| Profile | Actor intent |
+|---|---|
+| Radiology **Scheduled Workflow (SWF)** | Acquisition Modality (MWL → acquire → store) |
+| **Consistent Presentation / patient ID** hygiene | Correct demographics from worklist, not free-text when avoidable |
+| Radiology **Web-based Image Capture (WIC)** | Optional path: mobile capturer → Image Manager via DICOMweb |
+| ITI **ATNA** | Audit trail of query/store/auth events |
+| ITI **CT** (Consistent Time) | Device clock sync expectation (NTP via MDM) |
+
+### Security / privacy / regulatory posture
+
+Treat as handling **health data** from day one:
+
+- Encrypted app-private storage only; never write to system gallery / MediaStore
+- TLS for DICOMweb; DICOM TLS (or VPN-only LAN) for DIMSE
+- Authn: device + user (hospital IdP later); configurable AE Titles
+- Wipe policy: delete local objects immediately after PACS success ACK; crash-safe purge on next launch
+- GDPR/AVG: DPIA, DPA with sites, data minimization, retention = “until sent”
+- Medical device classification (EU MDR / local rules): decide early with counsel; architecture should support a controlled quality system (versioning, audit, SBOM)
+- Hospital IT: MDM config (AE Title, PACS host, TLS certs, feature flags)
+
+---
+
+## Architecture (proposed)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Android app (Kotlin)                                   │
+│  UI → Capture → DICOM encoder → Network → Purge         │
+│         ↑              ↑                                │
+│    CameraX        DICOM toolkit                         │
+└─────────┬──────────────┬────────────────────────────────┘
+          │              │
+   DIMSE (C-ECHO/FIND/STORE)     DICOMweb (QIDO/STOW/WADO)
+          │              │
+          └──────┬───────┘
+                 ▼
+        Any standards-compliant PACS / VNA
+                 ▲
+        MWL SCP (often RIS or broker)
+```
+
+**Stack leanings (to validate in Phase 0):**
+
+- UI: Kotlin + Jetpack Compose + CameraX
+- DICOM: native DCMTK via NDK **or** pure-JVM dcm4che — pick one primary stack in Phase 0 spike
+- Local test harness: Orthanc and/or dcm4chee + sample MWL
+- Config: encrypted SharedPreferences / DataStore; MDM managed configurations
+
+**Non-goals for architecture:** cloud intermediary that re-stores images (keeps PHI out of our servers unless a site explicitly deploys an optional broker).
+
+---
+
+## Phased delivery
+
+### Phase 0 — Foundations (no clinical workflow yet)
+
+**Goal:** Runnable Android skeleton, local PACS lab, standards decisions locked.
+
+- Repo layout, CI, signing, Build flavors (dev/staging)
+- Spin up Orthanc (C-STORE/C-FIND) + MWL test SCP
+- Spike: C-ECHO + encapsulate one JPEG as DICOM SC + C-STORE
+- Spike: CameraX photo → temp encrypted file → delete API
+- Decide DIMSE library and whether DICOMweb is Phase 2 or Phase 3
+- Threat model + data-flow diagram (capture → encode → store → wipe)
+- Compliance checklist stub (DICOM conformance statement outline)
+
+**Exit criteria:** Hello-PACS demo on a device/emulator; written ADR for DICOM stack.
+
+---
+
+### Phase 1 — Store path MVP (manual patient)
+
+**Goal:** Safest useful loop: identify patient manually → photo → DICOM → PACS → wipe.
+
+- PACS node settings UI (host, port, called/calling AE Title, TLS toggle)
+- C-ECHO connectivity test
+- Manual demographics form (Patient ID, Name, DOB, Sex, Accession optional)
+- Photo capture (CameraX), preview, retake
+- Encode VL Photographic Image or Secondary Capture with required Type 1/2 tags
+- C-STORE with progress + success/failure UX
+- **Mandatory wipe** of pixel data + DICOM file after success
+- Failure path: keep **only** encrypted ephemeral queue until retry succeeds or user discards (no gallery leakage)
+
+**Exit criteria:** Images appear correctly in Orthanc/PACS viewer with demographics; device storage has zero residual study files after success.
+
+---
+
+### Phase 2 — Worklist + append-to-exam
+
+**Goal:** Real clinical identity binding and “add more photos to this exam.”
+
+- MWL C-FIND SCU (filters: date, modality, station AE, Patient ID, Accession)
+- Worklist picker → populate all study/order tags; create Series per capture session
+- Study-level C-FIND (QR) by Patient ID / Accession / Study Instance UID
+- **Append workflow:** select existing study → new Series → Store with same Study Instance UID
+- Guardrails: confirm patient banner before every shutter press; prevent cross-patient append
+- Basic audit log entries (who/what/when/study UID)
+
+**Exit criteria:** Scheduled case from MWL and append-to-existing-study both verified against test PACS; Conformance Statement draft covers MWL + Storage + Query.
+
+---
+
+### Phase 3 — Video + session UX
+
+**Goal:** Photos and videos in one exam session; reliable send; still no durable local archive.
+
+- Video capture via CameraX; encode to agreed DICOM video SOP (or multi-frame policy documented)
+- Multi-shot session tray (in-memory / encrypted staging only)
+- Batch store with per-instance status; wipe each instance on ACK
+- Network resilience: retry with backoff; discard/export policy if PACS unreachable (prefer block capture when offline for MVP strictness, or short encrypted staging — product decision)
+- Series descriptions / body part / laterality codes (CID where practical)
+
+**Exit criteria:** Mixed photo+video study stored and queryable; purge verified after batch success.
+
+---
+
+### Phase 4 — Vendor independence hardening + IHE alignment
+
+**Goal:** Works across PACS brands; hospital-ready integration story.
+
+- Dual stack: **DIMSE** and **DICOMweb** (QIDO-RS query, STOW-RS store) selectable per site
+- Character set / timezone / date handling edge cases
+- DICOM TLS + private CA install via MDM
+- Android Managed Configurations (no manual AE typing for end users)
+- IHE SWF modality actor checklist; optional WIC path documented
+- ATNA-style audit export (syslog/TLS or file for SIEM)
+- Draft **DICOM Conformance Statement** + deployment guide for IT
+
+**Exit criteria:** Verified against ≥2 PACS products (e.g. Orthanc + one commercial/VNA); IT deploy doc complete.
+
+---
+
+### Phase 5 — EHR-friendly launch + compliance packaging
+
+**Goal:** Fit beside any EHR without vendor lock-in; ready for regulated rollout discussions.
+
+- Context launch patterns: QR/barcode of Accession or Patient ID; optional FHIR `ImagingStudy` / `ServiceRequest` deep link
+- Unscheduled / emergency workflow (create study with generated UIDs under local policy)
+- Role-based access (operator vs admin config)
+- Privacy UX: clear “not stored on device” messaging; remote wipe assumptions under MDM
+- Quality system artifacts: SBOM, versioned releases, test evidence pack
+- MDR/regulatory pathway decision recorded; engage notified body/counsel as needed
+
+**Exit criteria:** Pilot-ready build + compliance pack for a hospital IT/security review.
+
+---
+
+## Suggested module map (implementation)
+
+```
+app/
+  ui/          # Compose screens: worklist, capture, review, settings
+  capture/     # CameraX photo/video
+  dicom/       # Encode SOP instances, UID generation
+  network/     # DIMSE + DICOMweb clients
+  identity/    # MWL + QR query models
+  security/    # crypto, wipe, secure staging
+  audit/       # local audit trail
+  config/      # PACS nodes, MDM
+```
+
+---
+
+## Testing strategy
+
+| Layer | What |
+|---|---|
+| Unit | Tag builders, UID rules, wipe guarantees, query filters |
+| Integration | Orthanc + MWL SCP in CI/docker |
+| Device | CameraX on real Android hardware; MDM config smoke |
+| Conformance | Store/MWL/Find against validator / dciodvfy where applicable |
+| Security | No MediaStore leakage; leftover file scan after kill/crash |
+
+---
+
+## Open decisions (resolve in Phase 0–1)
+
+1. **DICOM toolkit:** DCMTK (NDK) vs dcm4che (JVM) vs hybrid
+2. **Offline policy:** block capture when PACS unreachable vs short encrypted staging queue
+3. **Video SOP class:** which encapsulated/multi-frame profile to standardize on
+4. **Primary transfer syntax:** JPEG Baseline vs JPEG-LS vs uncompressed for photos
+5. **Regulatory class:** documentation-only vs medical device under MDR for target markets
+6. **Auth model:** AE-only LAN trust vs user login (OIDC/SAML) in MVP
+
+---
+
+## Phase priority for build start
+
+Ship value in this order: **Phase 0 → 1 → 2 → 3**, with Phase 4 work overlapping Phase 2–3 (DICOMweb spike early). Phase 5 tracks in parallel once a pilot site appears.
+
+When Phase 0 starts, first concrete tasks:
+
+1. Android project scaffold (Compose + CameraX)
+2. Docker Orthanc (+ MWL) for local/CI
+3. DICOM stack spike: Echo + Store one photo
+4. Secure staging + wipe proof test

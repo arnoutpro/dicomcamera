@@ -8,9 +8,6 @@ import org.dcm4che3.data.VR
 import org.dcm4che3.io.DicomOutputStream
 import org.dcm4che3.util.ByteUtils
 import java.io.File
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 
 /**
  * Encodes an MP4/H.264 clip as DICOM Video Photographic Image Storage
@@ -46,8 +43,15 @@ class VideoPhotographicEncoder(
             setString(Tag.ImplementationVersionName, VR.SH, PhotographicImageEncoder.IMPLEMENTATION_VERSION)
         }
 
-        val nowDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
-        val nowTime = LocalTime.now().format(DateTimeFormatter.ofPattern("HHmmss"))
+        val nowDate = DicomDateTime.todayDa()
+        val nowTime = DicomDateTime.nowTm()
+        val tz = DicomDateTime.timezoneOffsetFromUtc()
+        val charset = DicomText.specificCharacterSet(
+            context.patientId,
+            context.patientName,
+            context.studyDescription,
+            context.seriesDescription,
+        )
 
         val fragments = Fragments(VR.OB, false, 2).apply {
             add(ByteUtils.EMPTY_BYTES)
@@ -55,7 +59,7 @@ class VideoPhotographicEncoder(
         }
 
         val dataset = Attributes().apply {
-            setString(Tag.SpecificCharacterSet, VR.CS, "ISO_IR 100")
+            setString(Tag.SpecificCharacterSet, VR.CS, charset)
             setString(Tag.ImageType, VR.CS, "ORIGINAL", "PRIMARY")
             setString(Tag.SOPClassUID, VR.UI, UID.VideoPhotographicImageStorage)
             setString(Tag.SOPInstanceUID, VR.UI, sopUid)
@@ -66,8 +70,8 @@ class VideoPhotographicEncoder(
 
             setString(Tag.PatientID, VR.LO, context.patientId)
             setString(Tag.PatientName, VR.PN, context.patientName)
-            setString(Tag.PatientBirthDate, VR.DA, context.patientBirthDate.orEmpty())
-            setString(Tag.PatientSex, VR.CS, context.patientSex.orEmpty())
+            setString(Tag.PatientBirthDate, VR.DA, DicomText.normalizeDa(context.patientBirthDate).orEmpty())
+            setString(Tag.PatientSex, VR.CS, DicomText.normalizeSex(context.patientSex).orEmpty())
             setString(Tag.AccessionNumber, VR.SH, context.accessionNumber.orEmpty())
             setString(Tag.ReferringPhysicianName, VR.PN, "")
             setString(Tag.StudyID, VR.SH, "")
@@ -97,9 +101,10 @@ class VideoPhotographicEncoder(
             setString(Tag.AcquisitionTime, VR.TM, nowTime)
             setString(Tag.InstanceCreationDate, VR.DA, nowDate)
             setString(Tag.InstanceCreationTime, VR.TM, nowTime)
+            setString(Tag.TimezoneOffsetFromUTC, VR.SH, tz)
 
             setString(Tag.Manufacturer, VR.LO, "DICOM Camera")
-            setString(Tag.ManufacturerModelName, VR.LO, "Android Phase3")
+            setString(Tag.ManufacturerModelName, VR.LO, "Android Phase4")
             setNull(Tag.AcquisitionContextSequence, VR.SQ)
 
             setInt(Tag.SamplesPerPixel, VR.US, 3)

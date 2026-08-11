@@ -241,6 +241,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Works across PACS brands; hospital-ready integration story.
 
+**Status:** Implemented on branch `cursor/phase-4-vendor-hardening-cbc8`.
+
 - Dual stack: **DIMSE** and **DICOMweb** (QIDO-RS query, STOW-RS store) selectable per site
 - Character set / timezone / date handling edge cases
 - DICOM TLS + private CA install via MDM

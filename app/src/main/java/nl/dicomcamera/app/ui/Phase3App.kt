@@ -157,6 +157,7 @@ fun Phase3App() {
 
     var destination by remember { mutableStateOf(Destination.Worklist) }
     var lastMainTab by remember { mutableStateOf(MainTab.Worklist) }
+    var settingsTitle by remember { mutableStateOf("Settings") }
     var patient by remember { mutableStateOf(ManualPatientForm()) }
     var exam by remember { mutableStateOf<ExamSelection?>(null) }
     var session by remember { mutableStateOf(CaptureSession()) }
@@ -197,7 +198,7 @@ fun Phase3App() {
     val title = when (destination) {
         Destination.Worklist -> "Worklist"
         Destination.Archive -> "Archive"
-        Destination.Settings -> "Settings"
+        Destination.Settings -> settingsTitle
         Destination.Capture -> "Session capture"
         Destination.Sending -> "Sending"
         Destination.Result -> "Result"
@@ -310,7 +311,7 @@ fun Phase3App() {
                                             patientSex = patient.sex.takeIf { it.isNotBlank() },
                                             accessionNumber = patient.accessionNumber.takeIf { it.isNotBlank() },
                                             studyDescription = patient.studyDescription.takeIf { it.isNotBlank() },
-                                            modality = "XC",
+                                            modality = pacsSettings.modality.ifBlank { "XC" },
                                             seriesDescription = "Clinical photo/video session",
                                             bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
                                             laterality = patient.laterality.takeIf { it.isNotBlank() },
@@ -325,8 +326,9 @@ fun Phase3App() {
                     },
                 )
 
-                Destination.Settings -> SettingsScreen(
+                Destination.Settings -> SettingsFlow(
                     initial = pacsSettings,
+                    echoStatus = statusNote,
                     onSave = { updated ->
                         scope.launch {
                             settingsRepo.save(updated)
@@ -348,7 +350,7 @@ fun Phase3App() {
                             }
                         }
                     },
-                    echoStatus = statusNote,
+                    onTitleChange = { settingsTitle = it },
                 )
 
                 Destination.Archive -> {
@@ -689,98 +691,6 @@ private fun ChoiceRow(
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(end = 8.dp),
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsScreen(
-    initial: PacsSettings,
-    onSave: (PacsSettings) -> Unit,
-    onEcho: (PacsSettings) -> Unit,
-    echoStatus: String,
-) {
-    var draft by remember(initial) { mutableStateOf(initial) }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        ScreenTitle(
-            title = "PACS connection",
-            subtitle = "DIMSE endpoint used for worklist, append, and C-STORE.",
-        )
-        SoftPanel {
-            SectionLabel("Endpoint")
-            DicomTextField(
-                value = draft.host,
-                onValueChange = { draft = draft.copy(host = it) },
-                label = "PACS host",
-            )
-            DicomTextField(
-                value = draft.port.toString(),
-                onValueChange = { text ->
-                    draft = draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port)
-                },
-                label = "PACS port",
-            )
-            DicomTextField(
-                value = draft.calledAeTitle,
-                onValueChange = { draft = draft.copy(calledAeTitle = it) },
-                label = "Called AE Title",
-            )
-            DicomTextField(
-                value = draft.callingAeTitle,
-                onValueChange = { draft = draft.copy(callingAeTitle = it) },
-                label = "Calling AE Title",
-            )
-        }
-        SoftPanel {
-            SectionLabel("DICOM TLS")
-            Text(
-                text = "Uses system trust store; hospital CA install via MDM later.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (draft.useTls) "TLS enabled" else "TLS disabled",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Switch(
-                    checked = draft.useTls,
-                    onCheckedChange = { draft = draft.copy(useTls = it) },
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = DicomColors.Forest,
-                        checkedThumbColor = DicomColors.White,
-                        uncheckedTrackColor = DicomColors.Hairline,
-                        uncheckedThumbColor = DicomColors.Slate500,
-                    ),
-                )
-            }
-            QuietOutlinedButton(
-                text = "Test C-ECHO",
-                onClick = { onEcho(draft) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            ForestButton(
-                text = "Save settings",
-                onClick = { onSave(draft) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (echoStatus.isNotBlank()) {
-                val tone = when {
-                    echoStatus.contains("OK") -> StatusTone.Success
-                    echoStatus.contains("failed", ignoreCase = true) -> StatusTone.Error
-                    else -> StatusTone.Info
-                }
-                StatusBanner(text = echoStatus, tone = tone)
             }
         }
     }

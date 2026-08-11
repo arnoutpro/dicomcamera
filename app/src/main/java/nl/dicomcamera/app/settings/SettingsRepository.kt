@@ -14,7 +14,9 @@ import nl.dicomcamera.app.BuildConfig
 import nl.dicomcamera.dicom.DicomNode
 import nl.dicomcamera.dicom.PacsEndpoint
 import nl.dicomcamera.dicom.TransportMode
+import nl.dicomcamera.identity.FhirConfig
 import nl.dicomcamera.identity.Hl7FacadeConfig
+import nl.dicomcamera.identity.IdentityLookupMode
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "dicomcamera_settings")
 
@@ -39,6 +41,17 @@ data class PacsSettings(
     val hl7Enabled: Boolean = false,
     val hl7BaseUrl: String = "",
     val hl7BearerToken: String = "",
+    /** FHIR R4 Patient / order gateway. */
+    val fhirEnabled: Boolean = false,
+    val fhirBaseUrl: String = "",
+    val fhirBearerToken: String = "",
+    /** Which EHR adapters to try for demographics. */
+    val identityLookupMode: IdentityLookupMode = IdentityLookupMode.FHIR_THEN_HL7,
+    /**
+     * When true (MDM), Settings edits are locked for operators.
+     * Local DataStore still holds the values; MDM overlay applies PACS/EHR keys.
+     */
+    val adminConfigLocked: Boolean = false,
     /** Opt-in diagnostic logging (off by default). */
     val loggingEnabled: Boolean = false,
     /** True when Managed Configurations overlay is active. */
@@ -68,7 +81,15 @@ data class PacsSettings(
         bearerToken = hl7BearerToken.trim(),
     )
 
+    fun toFhirConfig(): FhirConfig = FhirConfig(
+        enabled = fhirEnabled,
+        baseUrl = fhirBaseUrl.trim(),
+        bearerToken = fhirBearerToken.trim(),
+    )
+
     fun isConfigured(): Boolean = toEndpoint().isConfigured()
+
+    fun settingsEditable(): Boolean = !managedByMdm && !adminConfigLocked
 
     fun localSummary(): String =
         listOfNotNull(
@@ -99,6 +120,19 @@ data class PacsSettings(
 
     fun hl7Summary(): String = toHl7Config().summary()
 
+    fun fhirSummary(): String = toFhirConfig().summary()
+
+    fun identitySummary(): String {
+        val parts = mutableListOf<String>()
+        if (toFhirConfig().isConfigured()) parts += "FHIR"
+        if (toHl7Config().isConfigured()) parts += "HL7"
+        return if (parts.isEmpty()) {
+            "No EHR lookup configured"
+        } else {
+            "${parts.joinToString(" + ")} · ${identityLookupMode.name.replace('_', ' ').lowercase()}"
+        }
+    }
+
     fun loggingSummary(): String =
         if (loggingEnabled) "Enabled — export from Logging" else "Off (manual activation)"
 }
@@ -117,6 +151,11 @@ class SettingsRepository(private val context: Context) {
         val hl7Enabled = booleanPreferencesKey("hl7_enabled")
         val hl7Url = stringPreferencesKey("hl7_base_url")
         val hl7Token = stringPreferencesKey("hl7_bearer_token")
+        val fhirEnabled = booleanPreferencesKey("fhir_enabled")
+        val fhirUrl = stringPreferencesKey("fhir_base_url")
+        val fhirToken = stringPreferencesKey("fhir_bearer_token")
+        val identityMode = stringPreferencesKey("identity_lookup_mode")
+        val adminLocked = booleanPreferencesKey("admin_config_locked")
         val loggingEnabled = booleanPreferencesKey("logging_enabled")
     }
 
@@ -136,6 +175,13 @@ class SettingsRepository(private val context: Context) {
             hl7Enabled = prefs[Keys.hl7Enabled] ?: false,
             hl7BaseUrl = prefs[Keys.hl7Url].orEmpty(),
             hl7BearerToken = prefs[Keys.hl7Token].orEmpty(),
+            fhirEnabled = prefs[Keys.fhirEnabled] ?: false,
+            fhirBaseUrl = prefs[Keys.fhirUrl].orEmpty(),
+            fhirBearerToken = prefs[Keys.fhirToken].orEmpty(),
+            identityLookupMode = prefs[Keys.identityMode]?.let {
+                runCatching { IdentityLookupMode.valueOf(it) }.getOrDefault(IdentityLookupMode.FHIR_THEN_HL7)
+            } ?: IdentityLookupMode.FHIR_THEN_HL7,
+            adminConfigLocked = prefs[Keys.adminLocked] ?: false,
             loggingEnabled = prefs[Keys.loggingEnabled] ?: false,
         )
         ManagedConfig.merge(context, local)
@@ -158,6 +204,11 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.hl7Enabled] = settings.hl7Enabled
             prefs[Keys.hl7Url] = settings.hl7BaseUrl.trim()
             prefs[Keys.hl7Token] = settings.hl7BearerToken.trim()
+            prefs[Keys.fhirEnabled] = settings.fhirEnabled
+            prefs[Keys.fhirUrl] = settings.fhirBaseUrl.trim()
+            prefs[Keys.fhirToken] = settings.fhirBearerToken.trim()
+            prefs[Keys.identityMode] = settings.identityLookupMode.name
+            prefs[Keys.adminLocked] = settings.adminConfigLocked
             prefs[Keys.loggingEnabled] = settings.loggingEnabled
         }
     }

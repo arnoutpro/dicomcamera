@@ -47,4 +47,46 @@
         android:title="Station name"
         android:restrictionType="string"
         android:defaultValue="" />
+    <restriction
+        android:key="hl7_enabled"
+        android:title="Enable HL7 demographics façade"
+        android:restrictionType="bool"
+        android:defaultValue="false" />
+    <restriction
+        android:key="hl7_base_url"
+        android:title="HL7 façade base URL"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="hl7_bearer_token"
+        android:title="HL7 façade bearer token"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="fhir_enabled"
+        android:title="Enable FHIR Patient lookup"
+        android:restrictionType="bool"
+        android:defaultValue="false" />
+    <restriction
+        android:key="fhir_base_url"
+        android:title="FHIR base URL"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="fhir_bearer_token"
+        android:title="FHIR bearer token"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="identity_lookup_mode"
+        android:title="EHR identity lookup mode"
+        android:restrictionType="choice"
+        android:defaultValue="FHIR_THEN_HL7"
+        android:entries="@array/identity_mode_entries"
+        android:entryValues="@array/identity_mode_values" />
+    <restriction
+        android:key="admin_config_locked"
+        android:title="Lock settings for operators"
+        android:restrictionType="bool"
+        android:defaultValue="false" />
 </restrictions>

@@ -241,7 +241,7 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Works across PACS brands; hospital-ready integration story.
 
-**Status:** In progress on branch `cursor/phase-4-on-main-cbc8` — dual stack + MDM + ATNA + docs integrated onto current Phase 3 UX.
+**Status:** Done (merged via PR #20). Dual stack, MDM, ATNA, charset/timezone, IT/IHE docs.
 
 - Dual stack: **DIMSE** and **DICOMweb** (QIDO-RS query, STOW-RS store) selectable per site
 - Character set / timezone / date handling edge cases
@@ -258,6 +258,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 ### Phase 5 — EHR identity (HL7 + FHIR) + NL/EU compliance packaging
 
 **Goal:** Resolve patient/order details from the EPD on the fly; pilot-ready for Dutch/EU IT, security, and privacy review.
+
+**Status:** In progress on branch `cursor/phase-5-ehr-identity-cbc8` — FHIR + HL7 composite lookup, privacy UX, compliance pack drafts.
 
 **Identity (planned capability — not an afterthought)**
 

@@ -8,4 +8,16 @@
         <item>DIMSE</item>
         <item>DICOMWEB</item>
     </string-array>
+    <string-array name="identity_mode_entries">
+        <item>FHIR then HL7</item>
+        <item>HL7 then FHIR</item>
+        <item>FHIR only</item>
+        <item>HL7 only</item>
+    </string-array>
+    <string-array name="identity_mode_values">
+        <item>FHIR_THEN_HL7</item>
+        <item>HL7_THEN_FHIR</item>
+        <item>FHIR_ONLY</item>
+        <item>HL7_ONLY</item>
+    </string-array>
 </resources>

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.RestrictionsManager
 import android.os.Bundle
 import nl.dicomcamera.dicom.TransportMode
+import nl.dicomcamera.identity.IdentityLookupMode
 
 /**
  * Android Managed Configurations (MDM) overlay. When the device is managed,
@@ -21,6 +22,14 @@ object ManagedConfig {
     const val KEY_DICOMWEB_URL = "pacs_dicomweb_url"
     const val KEY_MODALITY = "modality_code"
     const val KEY_STATION = "station_name"
+    const val KEY_HL7_ENABLED = "hl7_enabled"
+    const val KEY_HL7_URL = "hl7_base_url"
+    const val KEY_HL7_TOKEN = "hl7_bearer_token"
+    const val KEY_FHIR_ENABLED = "fhir_enabled"
+    const val KEY_FHIR_URL = "fhir_base_url"
+    const val KEY_FHIR_TOKEN = "fhir_bearer_token"
+    const val KEY_IDENTITY_MODE = "identity_lookup_mode"
+    const val KEY_ADMIN_LOCKED = "admin_config_locked"
 
     fun isManaged(context: Context): Boolean {
         val rm = context.getSystemService(Context.RESTRICTIONS_SERVICE) as? RestrictionsManager
@@ -68,6 +77,32 @@ object ManagedConfig {
         }
         bundle.getString(KEY_STATION)?.let {
             next = next.copy(stationName = it)
+        }
+        if (bundle.containsKey(KEY_HL7_ENABLED)) {
+            next = next.copy(hl7Enabled = bundle.getBoolean(KEY_HL7_ENABLED))
+        }
+        bundle.getString(KEY_HL7_URL)?.takeIf { it.isNotBlank() }?.let {
+            next = next.copy(hl7BaseUrl = it)
+        }
+        bundle.getString(KEY_HL7_TOKEN)?.let {
+            next = next.copy(hl7BearerToken = it)
+        }
+        if (bundle.containsKey(KEY_FHIR_ENABLED)) {
+            next = next.copy(fhirEnabled = bundle.getBoolean(KEY_FHIR_ENABLED))
+        }
+        bundle.getString(KEY_FHIR_URL)?.takeIf { it.isNotBlank() }?.let {
+            next = next.copy(fhirBaseUrl = it)
+        }
+        bundle.getString(KEY_FHIR_TOKEN)?.let {
+            next = next.copy(fhirBearerToken = it)
+        }
+        bundle.getString(KEY_IDENTITY_MODE)?.takeIf { it.isNotBlank() }?.let { raw ->
+            runCatching { IdentityLookupMode.valueOf(raw.uppercase()) }.getOrNull()?.let {
+                next = next.copy(identityLookupMode = it)
+            }
+        }
+        if (bundle.containsKey(KEY_ADMIN_LOCKED)) {
+            next = next.copy(adminConfigLocked = bundle.getBoolean(KEY_ADMIN_LOCKED))
         }
         return next
     }

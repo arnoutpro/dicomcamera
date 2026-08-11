@@ -76,14 +76,3 @@ class ModalityWorklistDirectory(
         }
     }
 }
-
-/**
- * Placeholder — Phase 5 FHIR R4 Patient search / SMART launch.
- */
-class FhirPatientDirectory : PatientDirectory {
-    override val source: IdentitySource = IdentitySource.FHIR
-
-    override suspend fun findPatients(query: PatientQuery): List<PatientDemographics> {
-        throw NotImplementedError("FHIR Patient lookup lands in Phase 5")
-    }
-}

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Dev/lab: Orthanc on host/emulator often uses cleartext DIMSE; HTTP UI is separate. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

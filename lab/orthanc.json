@@ -1,0 +1,13 @@
+{
+  "Name": "DicomCameraLab",
+  "DicomAet": "ORTHANC",
+  "DicomPort": 4242,
+  "HttpPort": 8042,
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": false,
+  "DicomCheckCalledAet": false,
+  "DicomModalities": {},
+  "RegisteredUsers": {},
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db"
+}

@@ -157,12 +157,22 @@ fun SessionWorkflow(
             diagnosticLog.log("camera_cancelled", if (pending.photo) "photo" else "video")
             return@rememberLauncherForActivityResult
         }
-        val ok = SystemCameraCapture.finalizeCapture(context, pending, result.data)
-        if (!ok) {
+        val info = SystemCameraCapture.finalizeCapture(context, pending, result.data)
+        diagnosticLog.log(
+            "camera_finalize",
+            "ok=${info.ok} ${info.width}x${info.height} bytes=${info.bytes} src=${info.source}" +
+                (info.warning?.let { " warn=$it" } ?: ""),
+        )
+        if (!info.ok) {
             SystemCameraCapture.abandon(context, pending)
-            onStatus("Camera did not return an image — try again")
-            diagnosticLog.log("camera_finalize_fail", if (pending.photo) "photo" else "video")
+            onStatus(
+                info.warning
+                    ?: "Camera did not return a full-resolution image — try again",
+            )
             return@rememberLauncherForActivityResult
+        }
+        if (info.warning != null) {
+            onStatus(info.warning)
         }
         ingestCapture(pending)
     }
@@ -205,31 +215,49 @@ fun SessionWorkflow(
         }
     }
 
+    fun capturePermissions(): Array<String> {
+        val perms = mutableListOf(Manifest.permission.CAMERA)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            perms += Manifest.permission.READ_MEDIA_IMAGES
+            perms += Manifest.permission.READ_MEDIA_VIDEO
+        } else {
+            perms += Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return perms.toTypedArray()
+    }
+
+    fun hasAllCapturePermissions(): Boolean =
+        capturePermissions().all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+
     val cameraPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
         val photo = pendingPermissionPhoto
         pendingPermissionPhoto = null
-        if (!granted || photo == null) {
+        val cameraOk = grants[Manifest.permission.CAMERA] == true
+        if (!cameraOk || photo == null) {
             onStatus("Camera permission is required to capture")
-            diagnosticLog.log("camera_permission_denied", "CAMERA")
+            diagnosticLog.log("camera_permission_denied", grants.toString())
             return@rememberLauncherForActivityResult
         }
+        // Media read is optional (gallery fallback) — proceed even if denied.
         launchSystemCameraNow(photo)
     }
 
     fun startSystemCamera(photo: Boolean) {
-        // ColorOS (Oppo) rejects IMAGE_CAPTURE if our app's CAMERA permission is revoked.
-        val granted =
+        // ColorOS needs CAMERA; READ_MEDIA helps recover full-res from DCIM if EXTRA_OUTPUT is ignored.
+        val cameraGranted =
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
-        if (granted) {
+        if (cameraGranted && hasAllCapturePermissions()) {
             launchSystemCameraNow(photo)
             return
         }
         pendingPermissionPhoto = photo
         diagnosticLog.log("camera_permission_request", if (photo) "photo" else "video")
-        cameraPermission.launch(Manifest.permission.CAMERA)
+        cameraPermission.launch(capturePermissions())
     }
 
 

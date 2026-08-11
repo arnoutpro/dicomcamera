@@ -192,8 +192,10 @@ fun Phase3App() {
         withContext(Dispatchers.IO) {
             staging.purgeOrphans()
             archivedStore.purgeExpired()
+            pendingQueue.purgeExpired()
         }
         archivedRecords = archivedStore.list()
+        pendingItems = pendingQueue.list()
     }
 
     LaunchedEffect(pacsSettings.loggingEnabled) {
@@ -237,6 +239,7 @@ fun Phase3App() {
     fun refreshArchive() {
         readyStudies = localArchive.list()
         archivedRecords = archivedStore.list()
+        pendingItems = pendingQueue.list()
     }
 
     fun startNewSession(selection: ExamSelection) {
@@ -512,6 +515,7 @@ fun Phase3App() {
 
                 Destination.Archive -> {
                     LaunchedEffect(Unit) { refreshArchive() }
+                    val pendingGroups = remember(pendingItems) { pendingQueue.listGroupedByPatient() }
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -519,6 +523,59 @@ fun Phase3App() {
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
+                        SoftPanel {
+                            SectionLabel("Waiting for PACS (4 hours)")
+                            Text(
+                                "Failed or unconfigured stores stay here for up to 4 hours. Resend is manual — nothing is sent automatically.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DicomColors.Slate700,
+                            )
+                            if (pendingGroups.isEmpty()) {
+                                Text(
+                                    "No pending PACS uploads.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DicomColors.Slate500,
+                                )
+                            }
+                            pendingGroups.forEach { group ->
+                                SoftPanel {
+                                    Text(
+                                        "${group.patientId} · ${group.patientName}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        "${group.instanceCount} instance(s) · ${group.latestError}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = DicomColors.Slate700,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        ForestButton(
+                                            text = "Resend…",
+                                            onClick = {
+                                                refreshPending()
+                                                destination = Destination.Pending
+                                            },
+                                            compact = true,
+                                        )
+                                        QuietOutlinedButton(
+                                            text = "Discard",
+                                            onClick = {
+                                                pendingQueue.discardPatient(
+                                                    group.patientId,
+                                                    group.studyInstanceUid,
+                                                )
+                                                refreshPending()
+                                                diagnosticLog.log(
+                                                    "pending_discard_patient",
+                                                    "${group.patientId} ${group.studyInstanceUid}",
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         SoftPanel {
                             SectionLabel("Ready to send")
                             Text(
@@ -689,6 +746,7 @@ if (pacsSettings.isConfigured()) {
                         session = CaptureSession()
                         exam = null
                         worklistHint = null
+                        refreshArchive()
                         selectMainTab(MainTab.Archive)
                     },
                     onCancelWorkflow = {
@@ -703,15 +761,25 @@ if (pacsSettings.isConfigured()) {
                         selectMainTab(MainTab.Settings)
                     },
                     onArchivedRefresh = { refreshArchive() },
+                    onViewPending = {
+                        refreshPending()
+                        destination = Destination.Pending
+                    },
                     onStatus = { statusNote = it },
                 )
 
 
                 Destination.Pending -> PendingScreen(
                     items = pendingItems,
+                    pacsConfigured = pacsSettings.isConfigured(),
                     onRetry = { item ->
+                        if (!pacsSettings.isConfigured()) {
+                            statusNote = "Configure Remote DICOM before resending"
+                            return@PendingScreen
+                        }
                         scope.launch {
-                            statusNote = "Retrying..."
+                            statusNote = "Resending…"
+                            diagnosticLog.log("pending_resend", item.id)
                             val result = withContext(Dispatchers.IO) {
                                 val batch = nl.dicomcamera.dicom.BatchStore(
                                     clientFactory = { PacsClient(pacsSettings.toNode()) },
@@ -723,16 +791,60 @@ if (pacsSettings.isConfigured()) {
                                     pendingQueue.markStoredAndWipe(item.id)
                                     refreshPending()
                                     statusNote = "Stored ${result.sopInstanceUid}"
+                                    diagnosticLog.log("pending_resend_ok", result.sopInstanceUid)
                                 }
                                 is StoreResult.Failed -> {
-                                    statusNote = "Retry failed: ${result.message}"
+                                    statusNote = "Resend failed: ${result.message}"
+                                    diagnosticLog.log("pending_resend_fail", result.message)
                                 }
                             }
+                        }
+                    },
+                    onRetryPatient = { group ->
+                        if (!pacsSettings.isConfigured()) {
+                            statusNote = "Configure Remote DICOM before resending"
+                            return@PendingScreen
+                        }
+                        scope.launch {
+                            statusNote = "Resending ${group.instanceCount} instance(s)…"
+                            diagnosticLog.log(
+                                "pending_resend_patient",
+                                "${group.patientId} n=${group.instanceCount}",
+                            )
+                            var ok = 0
+                            var fail = 0
+                            group.items.forEach { item ->
+                                val result = withContext(Dispatchers.IO) {
+                                    val batch = nl.dicomcamera.dicom.BatchStore(
+                                        clientFactory = { PacsClient(pacsSettings.toNode()) },
+                                    )
+                                    batch.storeWithRetry(item.dicomFile).first
+                                }
+                                when (result) {
+                                    is StoreResult.Success -> {
+                                        pendingQueue.markStoredAndWipe(item.id)
+                                        ok++
+                                    }
+                                    is StoreResult.Failed -> fail++
+                                }
+                            }
+                            refreshPending()
+                            statusNote = "Resend done — stored $ok, failed $fail"
+                            diagnosticLog.log("pending_resend_patient_done", "ok=$ok fail=$fail")
                         }
                     },
                     onDiscard = { item ->
                         pendingQueue.discard(item.id)
                         refreshPending()
+                        diagnosticLog.log("pending_discard", item.id)
+                    },
+                    onDiscardPatient = { group ->
+                        pendingQueue.discardPatient(group.patientId, group.studyInstanceUid)
+                        refreshPending()
+                        diagnosticLog.log(
+                            "pending_discard_patient",
+                            "${group.patientId} ${group.studyInstanceUid}",
+                        )
                     },
                     statusNote = statusNote,
                 )
@@ -1377,10 +1489,29 @@ private fun ResultScreen(
 @Composable
 private fun PendingScreen(
     items: List<PendingStoreQueue.PendingItem>,
+    pacsConfigured: Boolean,
     onRetry: (PendingStoreQueue.PendingItem) -> Unit,
+    onRetryPatient: (PendingStoreQueue.PatientGroup) -> Unit,
     onDiscard: (PendingStoreQueue.PendingItem) -> Unit,
+    onDiscardPatient: (PendingStoreQueue.PatientGroup) -> Unit,
     statusNote: String,
 ) {
+    val groups = remember(items) {
+        items.groupBy { listOf(it.patientId, it.studyInstanceUid).joinToString("|") }
+            .values
+            .map { grouped ->
+                val newest = grouped.maxBy { it.createdAtEpochMs }
+                PendingStoreQueue.PatientGroup(
+                    patientId = newest.patientId,
+                    patientName = newest.patientName,
+                    studyInstanceUid = newest.studyInstanceUid,
+                    items = grouped.sortedByDescending { it.createdAtEpochMs },
+                    latestError = newest.lastError,
+                    createdAtEpochMs = newest.createdAtEpochMs,
+                )
+            }
+            .sortedByDescending { it.createdAtEpochMs }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1388,33 +1519,70 @@ private fun PendingScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (items.isEmpty()) {
+        SoftPanel {
+            SectionLabel("Pending uploads (4 hours)")
+            Text(
+                "Resend is always manual. Entries older than 4 hours are removed automatically.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            if (!pacsConfigured) {
+                Text(
+                    "Configure Remote DICOM in Settings before resending.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DicomColors.Rose,
+                )
+            }
+        }
+        if (groups.isEmpty()) {
             SoftPanel {
                 Text("No pending uploads.", style = MaterialTheme.typography.bodyMedium)
             }
         }
-        items.forEach { item ->
+        groups.forEach { group ->
             SoftPanel {
                 Text(
-                    text = "${item.patientId} · ${item.patientName}",
+                    text = "${group.patientId} · ${group.patientName}",
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    text = item.lastError,
+                    text = "${group.instanceCount} instance(s) · ${group.latestError}",
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = DicomType.Mono,
                     color = DicomColors.Rose,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ForestButton(
-                        text = "Retry",
-                        onClick = { onRetry(item) },
+                        text = "Resend all",
+                        onClick = { onRetryPatient(group) },
+                        enabled = pacsConfigured,
                         compact = true,
                     )
                     QuietOutlinedButton(
-                        text = "Discard",
-                        onClick = { onDiscard(item) },
+                        text = "Discard all",
+                        onClick = { onDiscardPatient(group) },
                     )
+                }
+                group.items.forEach { item ->
+                    SoftPanel {
+                        Text(
+                            text = item.lastError,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = DicomType.Mono,
+                            color = DicomColors.Rose,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ForestButton(
+                                text = "Resend",
+                                onClick = { onRetry(item) },
+                                enabled = pacsConfigured,
+                                compact = true,
+                            )
+                            QuietOutlinedButton(
+                                text = "Discard",
+                                onClick = { onDiscard(item) },
+                            )
+                        }
+                    }
                 }
             }
         }

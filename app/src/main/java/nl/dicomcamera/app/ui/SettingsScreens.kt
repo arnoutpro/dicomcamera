@@ -40,10 +40,11 @@ private enum class SettingsSection {
     Hub,
     LocalAe,
     RemoteDicom,
+    Hl7Demographics,
 }
 
 /**
- * Settings hub with Local AE and Remote DICOM (PACS) sections.
+ * Settings hub: Local AE, Remote DICOM (PACS), HL7 demographics façade.
  */
 @Composable
 fun SettingsFlow(
@@ -62,6 +63,7 @@ fun SettingsFlow(
                 SettingsSection.Hub -> "Settings"
                 SettingsSection.LocalAe -> "Local AE"
                 SettingsSection.RemoteDicom -> "Remote DICOM"
+                SettingsSection.Hl7Demographics -> "HL7 demographics"
             },
         )
     }
@@ -71,6 +73,7 @@ fun SettingsFlow(
             draft = draft,
             onOpenLocal = { section = SettingsSection.LocalAe },
             onOpenRemote = { section = SettingsSection.RemoteDicom },
+            onOpenHl7 = { section = SettingsSection.Hl7Demographics },
             onSave = { onSave(draft) },
             echoStatus = echoStatus,
         )
@@ -86,6 +89,11 @@ fun SettingsFlow(
             onEcho = { onEcho(draft) },
             onBack = { section = SettingsSection.Hub },
         )
+        SettingsSection.Hl7Demographics -> Hl7DemographicsSection(
+            draft = draft,
+            onChange = { draft = it },
+            onBack = { section = SettingsSection.Hub },
+        )
     }
 }
 
@@ -94,6 +102,7 @@ private fun SettingsHub(
     draft: PacsSettings,
     onOpenLocal: () -> Unit,
     onOpenRemote: () -> Unit,
+    onOpenHl7: () -> Unit,
     onSave: () -> Unit,
     echoStatus: String,
 ) {
@@ -106,12 +115,12 @@ private fun SettingsHub(
     ) {
         ScreenTitle(
             title = "Settings",
-            subtitle = "Configure this modality and the remote archive (PACS).",
+            subtitle = "Modality identity, PACS archive, and EHR demographics lookup.",
         )
 
         StatusBanner(
             text = if (draft.isConfigured()) {
-                "Ready — ${draft.remoteSummary()}"
+                "PACS ready — ${draft.remoteSummary()}"
             } else {
                 "Remote PACS not fully configured yet"
             },
@@ -129,6 +138,11 @@ private fun SettingsHub(
                 title = "Remote DICOM",
                 subtitle = draft.remoteSummary(),
                 onClick = onOpenRemote,
+            )
+            SettingsNavRow(
+                title = "HL7 demographics",
+                subtitle = draft.hl7Summary(),
+                onClick = onOpenHl7,
             )
         }
 
@@ -337,6 +351,82 @@ private fun RemoteDicomSection(
                 }
                 StatusBanner(text = echoStatus, tone = tone)
             }
+        }
+    }
+}
+
+@Composable
+private fun Hl7DemographicsSection(
+    draft: PacsSettings,
+    onChange: (PacsSettings) -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        ScreenTitle(
+            title = "HL7 demographics",
+            subtitle = "Query patient details via hospital HL7 façade (HTTPS). No raw MLLP on the phone.",
+        )
+        SoftPanel {
+            SectionLabel("Façade")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (draft.hl7Enabled) "HL7 lookup enabled" else "HL7 lookup disabled",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Switch(
+                    checked = draft.hl7Enabled,
+                    onCheckedChange = { onChange(draft.copy(hl7Enabled = it)) },
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = DicomColors.Forest,
+                        checkedThumbColor = DicomColors.White,
+                        uncheckedTrackColor = DicomColors.Hairline,
+                        uncheckedThumbColor = DicomColors.Slate500,
+                    ),
+                )
+            }
+            DicomTextField(
+                value = draft.hl7BaseUrl,
+                onValueChange = { onChange(draft.copy(hl7BaseUrl = it)) },
+                label = "Façade base URL",
+            )
+            Text(
+                "Example: https://ehr-gw.hospital.local/hl7 — app calls GET …/patients?patientId=",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            DicomTextField(
+                value = draft.hl7BearerToken,
+                onValueChange = { onChange(draft.copy(hl7BearerToken = it)) },
+                label = "Bearer token (optional)",
+            )
+        }
+        SoftPanel {
+            SectionLabel("Usage")
+            Text(
+                "On the Worklist tab, enter a Patient ID and tap Query HL7 to fill name, DOB, and sex.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            Text(
+                draft.hl7Summary(),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "Tap Save all settings on the Settings hub to persist.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate500,
+            )
         }
     }
 }

@@ -253,6 +253,7 @@ fun Phase3App() {
                     patient = patient,
                     onPatientChange = { patient = it },
                     pacsConfigured = pacsSettings.isConfigured(),
+                    hl7Configured = pacsSettings.toHl7Config().isConfigured(),
                     pendingCount = pendingItems.size,
                     statusNote = statusNote,
                     selectedBanner = exam?.banner,
@@ -263,6 +264,43 @@ fun Phase3App() {
                         destination = Destination.Pending
                     },
                     onOpenSettings = { selectMainTab(MainTab.Settings) },
+                    onQueryHl7 = {
+                        scope.launch {
+                            statusNote = "HL7 lookup…"
+                            val outcome = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    nl.dicomcamera.identity.Hl7PatientDirectory(
+                                        configProvider = { pacsSettings.toHl7Config() },
+                                    ).findPatients(
+                                        nl.dicomcamera.identity.PatientQuery(
+                                            patientId = patient.patientId.trim(),
+                                        ),
+                                    )
+                                }
+                            }
+                            outcome.onSuccess { list ->
+                                val hit = list.firstOrNull()
+                                if (hit == null) {
+                                    statusNote = "HL7: no patient found"
+                                } else {
+                                    patient = patient.copy(
+                                        patientId = hit.patientId,
+                                        patientName = hit.patientName,
+                                        birthDate = hit.birthDate.orEmpty(),
+                                        sex = hit.sex.orEmpty(),
+                                    )
+                                    audit.record(
+                                        "hl7_lookup",
+                                        patientId = hit.patientId,
+                                        detail = hit.patientName,
+                                    )
+                                    statusNote = "HL7: filled ${hit.patientName}"
+                                }
+                            }.onFailure { e ->
+                                statusNote = "HL7 failed: ${e.message}"
+                            }
+                        }
+                    },
                     onWorklistSelected = { entry: WorklistEntry ->
                         if (!pacsSettings.isConfigured()) {
                             statusNote = "Configure PACS in Settings first"
@@ -540,6 +578,7 @@ private fun WorklistTab(
     patient: ManualPatientForm,
     onPatientChange: (ManualPatientForm) -> Unit,
     pacsConfigured: Boolean,
+    hl7Configured: Boolean,
     pendingCount: Int,
     statusNote: String,
     selectedBanner: String?,
@@ -547,6 +586,7 @@ private fun WorklistTab(
     callingAeTitle: String,
     onOpenPending: () -> Unit,
     onOpenSettings: () -> Unit,
+    onQueryHl7: () -> Unit,
     onWorklistSelected: (WorklistEntry) -> Unit,
     onContinueManual: () -> Unit,
 ) {
@@ -560,12 +600,12 @@ private fun WorklistTab(
         BrandWordmark(size = 22)
         ScreenTitle(
             title = "Worklist",
-            subtitle = "Pick a scheduled exam, or enter demographics manually.",
+            subtitle = "MWL, HL7 demographics, or manual entry.",
         )
 
         if (!pacsConfigured) {
             StatusBanner(
-                text = "PACS not configured. You can still draft a manual patient, then open Settings to connect.",
+                text = "PACS not configured. Configure Remote DICOM in Settings to query MWL / send.",
                 tone = StatusTone.Warn,
             )
             QuietOutlinedButton(
@@ -592,7 +632,7 @@ private fun WorklistTab(
                 )
             } else {
                 Text(
-                    "Connect a PACS in Settings to query today’s worklist.",
+                    "Connect a PACS in Settings → Remote DICOM to query today’s worklist.",
                     style = MaterialTheme.typography.bodySmall,
                     color = DicomColors.Slate700,
                 )
@@ -600,12 +640,25 @@ private fun WorklistTab(
         }
 
         SoftPanel {
-            SectionLabel("Manual demographics")
+            SectionLabel("Patient demographics")
             DicomTextField(
                 value = patient.patientId,
                 onValueChange = { onPatientChange(patient.copy(patientId = it)) },
                 label = "Patient ID *",
             )
+            QuietOutlinedButton(
+                text = if (hl7Configured) "Query HL7 demographics" else "Query HL7 (configure in Settings)",
+                onClick = onQueryHl7,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hl7Configured && patient.patientId.isNotBlank(),
+            )
+            if (!hl7Configured) {
+                Text(
+                    "Enable Settings → HL7 demographics and set the façade URL.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DicomColors.Slate500,
+                )
+            }
             DicomTextField(
                 value = patient.patientName,
                 onValueChange = { onPatientChange(patient.copy(patientName = it)) },
@@ -646,7 +699,7 @@ private fun WorklistTab(
                 onSelect = { onPatientChange(patient.copy(laterality = it)) },
             )
             ForestButton(
-                text = "Continue with manual patient",
+                text = "Continue with this patient",
                 onClick = onContinueManual,
                 modifier = Modifier.fillMaxWidth(),
             )

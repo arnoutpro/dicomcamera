@@ -78,17 +78,6 @@ class ModalityWorklistDirectory(
 }
 
 /**
- * Placeholder — Phase 5 HL7 v2 demographics query via HTTPS façade.
- */
-class Hl7PatientDirectory : PatientDirectory {
-    override val source: IdentitySource = IdentitySource.HL7_V2
-
-    override suspend fun findPatients(query: PatientQuery): List<PatientDemographics> {
-        throw NotImplementedError("HL7 v2 patient lookup lands in Phase 5")
-    }
-}
-
-/**
  * Placeholder — Phase 5 FHIR R4 Patient search / SMART launch.
  */
 class FhirPatientDirectory : PatientDirectory {

@@ -13,8 +13,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 /**
- * Encodes a JPEG baseline still as DICOM Secondary Capture Image Storage
- * with encapsulated JPEG transfer syntax — Phase 0 spike encoder.
+ * Legacy Secondary Capture encoder (Phase 0). Prefer [PhotographicImageEncoder] for new captures.
  */
 class SecondaryCaptureEncoder(
     private val uidGenerator: () -> String = { DicomUid.newUid() },
@@ -30,7 +29,7 @@ class SecondaryCaptureEncoder(
         require(rows > 0 && columns > 0) { "rows/columns required" }
 
         val studyUid = context.studyInstanceUid?.takeIf { it.isNotBlank() } ?: uidGenerator()
-        val seriesUid = uidGenerator()
+        val seriesUid = context.seriesInstanceUid?.takeIf { it.isNotBlank() } ?: uidGenerator()
         val sopUid = uidGenerator()
 
         val fmi = Attributes(6).apply {
@@ -38,15 +37,15 @@ class SecondaryCaptureEncoder(
             setString(Tag.MediaStorageSOPClassUID, VR.UI, UID.SecondaryCaptureImageStorage)
             setString(Tag.MediaStorageSOPInstanceUID, VR.UI, sopUid)
             setString(Tag.TransferSyntaxUID, VR.UI, UID.JPEGBaseline8Bit)
-            setString(Tag.ImplementationClassUID, VR.UI, IMPLEMENTATION_CLASS_UID)
-            setString(Tag.ImplementationVersionName, VR.SH, IMPLEMENTATION_VERSION)
+            setString(Tag.ImplementationClassUID, VR.UI, PhotographicImageEncoder.IMPLEMENTATION_CLASS_UID)
+            setString(Tag.ImplementationVersionName, VR.SH, PhotographicImageEncoder.IMPLEMENTATION_VERSION)
         }
 
         val nowDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
         val nowTime = LocalTime.now().format(DateTimeFormatter.ofPattern("HHmmss"))
 
         val fragments = Fragments(VR.OB, false, 2).apply {
-            add(ByteUtils.EMPTY_BYTES) // basic offset table
+            add(ByteUtils.EMPTY_BYTES)
             add(jpegBytes)
         }
 
@@ -60,9 +59,9 @@ class SecondaryCaptureEncoder(
 
             setString(Tag.PatientID, VR.LO, context.patientId)
             setString(Tag.PatientName, VR.PN, context.patientName)
-            context.patientBirthDate?.let { setString(Tag.PatientBirthDate, VR.DA, it) }
-            context.patientSex?.let { setString(Tag.PatientSex, VR.CS, it) }
-            context.accessionNumber?.let { setString(Tag.AccessionNumber, VR.SH, it) }
+            setString(Tag.PatientBirthDate, VR.DA, context.patientBirthDate.orEmpty())
+            setString(Tag.PatientSex, VR.CS, context.patientSex.orEmpty())
+            setString(Tag.AccessionNumber, VR.SH, context.accessionNumber.orEmpty())
             context.studyDescription?.let { setString(Tag.StudyDescription, VR.LO, it) }
             context.seriesDescription?.let { setString(Tag.SeriesDescription, VR.LO, it) }
 
@@ -99,19 +98,8 @@ class SecondaryCaptureEncoder(
             sopInstanceUid = sopUid,
             studyInstanceUid = studyUid,
             seriesInstanceUid = seriesUid,
+            sopClassUid = UID.SecondaryCaptureImageStorage,
             file = outputFile,
         )
     }
-
-    companion object {
-        const val IMPLEMENTATION_CLASS_UID = "2.25.33300112233445566778899"
-        const val IMPLEMENTATION_VERSION = "DICOMCAM_0_1"
-    }
 }
-
-data class EncodedInstance(
-    val sopInstanceUid: String,
-    val studyInstanceUid: String,
-    val seriesInstanceUid: String,
-    val file: File,
-)

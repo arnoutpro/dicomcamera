@@ -15,7 +15,7 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Minimal DIMSE SCU for Phase 0: C-ECHO and C-STORE.
+ * Minimal DIMSE SCU: C-ECHO and C-STORE (VL Photographic + Secondary Capture).
  */
 class PacsClient(
     private val node: DicomNode,
@@ -26,7 +26,18 @@ class PacsClient(
         it.executor = executor
         it.scheduledExecutor = scheduledExecutor
     }
-    private val connection = Connection().also { dicomDevice.addConnection(it) }
+    private val connection = Connection().also { conn ->
+        if (node.useTls) {
+            conn.setTlsProtocols("TLSv1.2", "TLSv1.3")
+            conn.setTlsCipherSuites(
+                "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+                "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+                "TLS_AES_128_GCM_SHA256",
+                "TLS_AES_256_GCM_SHA384",
+            )
+        }
+        dicomDevice.addConnection(conn)
+    }
     private val applicationEntity = ApplicationEntity(node.callingAeTitle).also { ae ->
         dicomDevice.addApplicationEntity(ae)
         ae.addConnection(connection)
@@ -53,7 +64,7 @@ class PacsClient(
                 val dataset = input.readDataset()
                 val sopClassUid = fmi.getString(Tag.MediaStorageSOPClassUID)
                     ?: dataset.getString(Tag.SOPClassUID)
-                    ?: UID.SecondaryCaptureImageStorage
+                    ?: UID.VLPhotographicImageStorage
                 val sopInstanceUid = fmi.getString(Tag.MediaStorageSOPInstanceUID)
                     ?: dataset.getString(Tag.SOPInstanceUID)
                     ?: return StoreResult.Failed("Missing SOP Instance UID")
@@ -83,7 +94,12 @@ class PacsClient(
     }
 
     private inline fun <T> withAssociation(includeStorage: Boolean, block: (Association) -> T): T {
-        val remote = Connection("remote", node.host, node.port)
+        val remote = Connection("remote", node.host, node.port).also { remoteConn ->
+            if (node.useTls) {
+                remoteConn.setTlsProtocols(*connection.tlsProtocols)
+                remoteConn.setTlsCipherSuites(*connection.tlsCipherSuites)
+            }
+        }
         val rq = AAssociateRQ().apply {
             calledAET = node.calledAeTitle
             addPresentationContext(
@@ -93,6 +109,15 @@ class PacsClient(
                 addPresentationContext(
                     PresentationContext(
                         3,
+                        UID.VLPhotographicImageStorage,
+                        UID.JPEGBaseline8Bit,
+                        UID.ExplicitVRLittleEndian,
+                        UID.ImplicitVRLittleEndian,
+                    ),
+                )
+                addPresentationContext(
+                    PresentationContext(
+                        5,
                         UID.SecondaryCaptureImageStorage,
                         UID.JPEGBaseline8Bit,
                         UID.ExplicitVRLittleEndian,

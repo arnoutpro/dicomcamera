@@ -5,8 +5,8 @@ import java.io.RandomAccessFile
 import java.security.SecureRandom
 
 /**
- * Ephemeral staging for capture bytes. Files live only until successful PACS send (or discard).
- * Never writes to shared media galleries.
+ * Ephemeral staging for capture bytes. Files live only until successful PACS send,
+ * move into [PendingStoreQueue], or discard. Never writes to shared media galleries.
  */
 class SecureStaging(
     private val stagingDir: File,
@@ -17,6 +17,8 @@ class SecureStaging(
             check(stagingDir.mkdirs()) { "Unable to create staging dir: $stagingDir" }
         }
     }
+
+    val directory: File get() = stagingDir
 
     fun createStagingFile(prefix: String, suffix: String): File {
         return File(stagingDir, "$prefix-${System.currentTimeMillis()}-$suffix").apply {
@@ -56,12 +58,15 @@ class SecureStaging(
     }
 
     fun wipeAll(): List<Pair<File, WipeResult>> {
-        val files = stagingDir.listFiles()?.toList().orEmpty()
+        val files = stagingDir.listFiles()?.filter { it.isFile }?.toList().orEmpty()
         return files.map { it to wipe(it) }
     }
 
     fun listStagingFiles(): List<File> =
         stagingDir.listFiles()?.filter { it.isFile }?.toList().orEmpty()
+
+    /** Crash recovery: wipe leftover files in the hot staging folder (not pending/). */
+    fun purgeOrphans(): Int = wipeAll().count { it.second is WipeResult.Wiped || it.second is WipeResult.AlreadyGone }
 }
 
 sealed interface WipeResult {

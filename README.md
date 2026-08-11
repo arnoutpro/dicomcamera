@@ -5,16 +5,10 @@ Android clinical camera: capture photos/videos as DICOM, bind via Modality Workl
 **Android only. PACS/EHR vendor independent. No durable on-device archive after successful send.**  
 **Primary market:** Netherlands / EU (AVG, NEN 7510, MDR-aware).
 
-## Status — Phase 0 in progress
+## Status — Phase 1
 
-Foundations landed on this branch:
-
-- Android app (`dev` / `staging` flavors) with CameraX capture spike
-- `:dicom` module — Secondary Capture JPEG encode, C-ECHO/C-STORE (dcm4che), secure staging wipe
-- `:identity` module — `PatientDirectory` / `OrderDirectory` seams (manual now; MWL/HL7/FHIR later)
-- In-process PACS SCP unit tests (no Docker required in CI)
-- Orthanc docker-compose lab under `lab/`
-- Docs: ADR, threat model, MDR intended purpose draft, DPIA outline, conformance outline
+Manual patient → capture → review/retake → VL Photographic C-STORE → wipe.  
+Failed stores go to an on-device pending queue (retry/discard). PACS settings persist locally.
 
 See **[docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md)** for the full phased plan.
 
@@ -22,13 +16,13 @@ See **[docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md)** for the full phased plan.
 
 ```bash
 ./gradlew :dicom:testDebugUnitTest
-./gradlew :app:assembleDevDebug
+./gradlew :app:assembleStagingDebug
 ```
 
-Optional Orthanc lab (Docker on your machine):
+Optional Orthanc lab:
 
 ```bash
 cd lab && docker compose up -d
 ```
 
-Emulator → Orthanc defaults: host `10.0.2.2`, port `4242`, AE `ORTHANC`.
+Configure PACS in-app (gear icon). Staging flavor starts with empty host defaults.

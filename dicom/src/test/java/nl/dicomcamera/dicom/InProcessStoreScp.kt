@@ -92,6 +92,16 @@ class InProcessStoreScp(
                 UID.ImplicitVRLittleEndian,
             ),
         )
+        ae.addTransferCapability(
+            TransferCapability(
+                null,
+                UID.VLPhotographicImageStorage,
+                TransferCapability.Role.SCP,
+                UID.JPEGBaseline8Bit,
+                UID.ExplicitVRLittleEndian,
+                UID.ImplicitVRLittleEndian,
+            ),
+        )
     }
 
     val boundPort: Int

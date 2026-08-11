@@ -15,4 +15,8 @@ data class PatientStudyContext(
     val seriesInstanceUid: String? = null,
     val seriesDescription: String? = null,
     val modality: String = "XC",
+    /** DICOM Body Part Examined (0018,0015), e.g. HAND, CHEST. */
+    val bodyPartExamined: String? = null,
+    /** DICOM Laterality (0020,0060): L / R / U when applicable. */
+    val laterality: String? = null,
 )

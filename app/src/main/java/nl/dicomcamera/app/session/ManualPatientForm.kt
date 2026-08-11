@@ -7,6 +7,10 @@ data class ManualPatientForm(
     val sex: String = "", // M / F / O / empty
     val accessionNumber: String = "",
     val studyDescription: String = "",
+    /** DICOM Body Part Examined (0018,0015), e.g. HAND, FOOT. */
+    val bodyPartExamined: String = "",
+    /** DICOM Laterality (0020,0060): L / R / U / empty. */
+    val laterality: String = "",
 ) {
     fun isValid(): Boolean = patientId.isNotBlank() && patientName.isNotBlank()
 

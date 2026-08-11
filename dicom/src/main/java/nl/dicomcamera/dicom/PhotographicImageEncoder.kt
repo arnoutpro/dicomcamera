@@ -78,6 +78,12 @@ class PhotographicImageEncoder(
                 VR.LO,
                 context.seriesDescription?.takeIf { it.isNotBlank() } ?: "Clinical photograph",
             )
+            context.bodyPartExamined?.takeIf { it.isNotBlank() }?.let {
+                setString(Tag.BodyPartExamined, VR.CS, it.trim().uppercase())
+            }
+            context.laterality?.takeIf { it.isNotBlank() }?.let {
+                setString(Tag.Laterality, VR.CS, it.trim().uppercase())
+            }
 
             setString(Tag.Modality, VR.CS, context.modality)
             setString(Tag.StudyDate, VR.DA, nowDate)
@@ -92,7 +98,7 @@ class PhotographicImageEncoder(
             setString(Tag.InstanceCreationTime, VR.TM, nowTime)
 
             setString(Tag.Manufacturer, VR.LO, "DICOM Camera")
-            setString(Tag.ManufacturerModelName, VR.LO, "Android Phase1")
+            setString(Tag.ManufacturerModelName, VR.LO, "Android Phase3")
 
             // Acquisition Context Sequence Type 2 — empty
             setNull(Tag.AcquisitionContextSequence, VR.SQ)
@@ -126,7 +132,7 @@ class PhotographicImageEncoder(
 
     companion object {
         const val IMPLEMENTATION_CLASS_UID = "2.25.33300112233445566778899"
-        const val IMPLEMENTATION_VERSION = "DICOMCAM_0_2"
+        const val IMPLEMENTATION_VERSION = "DICOMCAM_0_4"
     }
 }
 

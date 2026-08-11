@@ -245,6 +245,16 @@ class PacsClient(
                             UID.ImplicitVRLittleEndian,
                         ),
                     )
+                    pcId += 2
+                    addPresentationContext(
+                        PresentationContext(
+                            pcId,
+                            UID.VideoPhotographicImageStorage,
+                            UID.MPEG4HP41,
+                            UID.ExplicitVRLittleEndian,
+                            UID.ImplicitVRLittleEndian,
+                        ),
+                    )
                 }
                 AssociationMode.Worklist -> {
                     addPresentationContext(

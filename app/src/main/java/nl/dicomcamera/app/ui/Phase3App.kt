@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,7 +39,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,6 +71,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nl.dicomcamera.app.diagnostics.DiagnosticLog
+import nl.dicomcamera.app.diagnostics.HostPing
 import nl.dicomcamera.app.session.CaptureKind
 import nl.dicomcamera.app.session.CaptureSession
 import nl.dicomcamera.app.session.ExamSelection
@@ -81,13 +84,16 @@ import nl.dicomcamera.app.session.SessionItemStatus
 import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.settings.SettingsRepository
 import nl.dicomcamera.app.ui.components.BrandWordmark
+import nl.dicomcamera.app.ui.components.ChromeBottomBar
 import nl.dicomcamera.app.ui.components.ChromeTopBar
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
+import nl.dicomcamera.app.ui.components.MainTab
 import nl.dicomcamera.app.ui.components.MetaChip
 import nl.dicomcamera.app.ui.components.QuietOutlinedButton
 import nl.dicomcamera.app.ui.components.ScreenTitle
 import nl.dicomcamera.app.ui.components.SectionLabel
+import nl.dicomcamera.app.ui.components.SegmentedChoice
 import nl.dicomcamera.app.ui.components.SoftPanel
 import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
@@ -104,18 +110,40 @@ import nl.dicomcamera.dicom.StoreResult
 import nl.dicomcamera.dicom.StudyEntry
 import nl.dicomcamera.dicom.WorklistEntry
 import java.io.File
+import java.io.FileInputStream
+import java.time.Instant
 
 private const val TAG = "Phase3App"
 
-private enum class Destination {
-    Patient,
-    Settings,
+private enum class WorklistMode {
     Worklist,
-    AppendStudy,
+    Manual,
+}
+
+private enum class Destination {
+    Worklist,
+    Archive,
+    Settings,
     Capture,
     Sending,
     Result,
     Pending,
+}
+
+private fun Destination.isMainTab(): Boolean =
+    this == Destination.Worklist || this == Destination.Archive || this == Destination.Settings
+
+private fun Destination.toMainTab(): MainTab = when (this) {
+    Destination.Worklist -> MainTab.Worklist
+    Destination.Archive -> MainTab.Archive
+    Destination.Settings -> MainTab.Settings
+    else -> MainTab.Worklist
+}
+
+private fun MainTab.toDestination(): Destination = when (this) {
+    MainTab.Worklist -> Destination.Worklist
+    MainTab.Archive -> Destination.Archive
+    MainTab.Settings -> Destination.Settings
 }
 
 @Composable
@@ -132,13 +160,22 @@ fun Phase3App() {
         PendingStoreQueue(File(context.filesDir, "pending"), staging)
     }
     val audit = remember { AuditLog(File(context.filesDir, "audit/audit.csv")) }
+    val diagnosticLog = remember {
+        DiagnosticLog(File(context.filesDir, "logs/diagnostic.log"))
+    }
     val batchSender = remember { SessionBatchSender(staging, pendingQueue, audit) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { staging.purgeOrphans() }
     }
 
-    var destination by remember { mutableStateOf(Destination.Patient) }
+    LaunchedEffect(pacsSettings.loggingEnabled) {
+        diagnosticLog.setEnabled(pacsSettings.loggingEnabled)
+    }
+
+    var destination by remember { mutableStateOf(Destination.Worklist) }
+    var lastMainTab by remember { mutableStateOf(MainTab.Worklist) }
+    var settingsTitle by remember { mutableStateOf("Settings") }
     var patient by remember { mutableStateOf(ManualPatientForm()) }
     var exam by remember { mutableStateOf<ExamSelection?>(null) }
     var session by remember { mutableStateOf(CaptureSession()) }
@@ -147,6 +184,37 @@ fun Phase3App() {
     var statusNote by remember { mutableStateOf("") }
     var sendProgress by remember { mutableStateOf("") }
     var pendingItems by remember { mutableStateOf(pendingQueue.list()) }
+    var logUiTick by remember { mutableStateOf(0) }
+
+    val downloadLogLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri: Uri? ->
+        if (uri == null) {
+            statusNote = "Download cancelled"
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = diagnosticLog.snapshotFile()
+                    if (!src.exists() || src.length() == 0L) {
+                        error("Log file is empty — enable logging and reproduce the issue first")
+                    }
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        FileInputStream(src).use { input -> input.copyTo(out) }
+                    } ?: error("Could not open destination")
+                }
+            }
+            statusNote = outcome.fold(
+                onSuccess = {
+                    diagnosticLog.log("log_download", "exported")
+                    "Log downloaded"
+                },
+                onFailure = { "Download failed: ${it.message}" },
+            )
+            logUiTick++
+        }
+    }
 
     fun refreshPending() {
         pendingItems = pendingQueue.list()
@@ -161,20 +229,25 @@ fun Phase3App() {
         )
     }
 
+    fun selectMainTab(tab: MainTab) {
+        lastMainTab = tab
+        statusNote = ""
+        destination = tab.toDestination()
+    }
+
     fun goBack() {
         destination = when (destination) {
-            Destination.Settings, Destination.Pending, Destination.Capture,
-            Destination.Worklist, Destination.AppendStudy -> Destination.Patient
-            Destination.Sending, Destination.Result -> Destination.Patient
-            Destination.Patient -> Destination.Patient
+            Destination.Capture -> lastMainTab.toDestination()
+            Destination.Sending, Destination.Result, Destination.Pending -> lastMainTab.toDestination()
+            Destination.Worklist, Destination.Archive, Destination.Settings -> destination
         }
     }
 
+    val showBottomBar = destination.isMainTab()
     val title = when (destination) {
-        Destination.Patient -> "DICOM Camera"
-        Destination.Settings -> "PACS settings"
-        Destination.Worklist -> "Modality worklist"
-        Destination.AppendStudy -> "Append to study"
+        Destination.Worklist -> "Worklist"
+        Destination.Archive -> "Archive"
+        Destination.Settings -> settingsTitle
         Destination.Capture -> "Session capture"
         Destination.Sending -> "Sending"
         Destination.Result -> "Result"
@@ -183,15 +256,18 @@ fun Phase3App() {
 
     Scaffold(
         containerColor = DicomColors.Linen,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ChromeTopBar(
                 title = title,
                 subtitle = when (destination) {
-                    Destination.Patient -> "Clinical capture"
+                    Destination.Worklist -> "Modality worklist & manual"
+                    Destination.Archive -> "Find study to append"
+                    Destination.Settings -> "PACS & modality"
                     Destination.Capture -> exam?.banner
                     else -> null
                 },
-                navigationIcon = if (destination != Destination.Patient) {
+                navigationIcon = if (!destination.isMainTab()) {
                     {
                         IconButton(onClick = { goBack() }) {
                             Icon(
@@ -204,18 +280,15 @@ fun Phase3App() {
                 } else {
                     null
                 },
-                actions = {
-                    if (destination == Destination.Patient) {
-                        IconButton(onClick = { destination = Destination.Settings }) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = "Settings",
-                                tint = DicomColors.Forest,
-                            )
-                        }
-                    }
-                },
             )
+        },
+        bottomBar = {
+            if (showBottomBar) {
+                ChromeBottomBar(
+                    selected = destination.toMainTab(),
+                    onSelect = { tab -> selectMainTab(tab) },
+                )
+            }
         },
     ) { padding ->
         Box(
@@ -225,96 +298,70 @@ fun Phase3App() {
                 .background(DicomColors.Linen),
         ) {
             when (destination) {
-                Destination.Patient -> PatientScreen(
+                Destination.Worklist -> WorklistTab(
                     patient = patient,
                     onPatientChange = { patient = it },
                     pacsConfigured = pacsSettings.isConfigured(),
+                    hl7Configured = pacsSettings.toHl7Config().isConfigured(),
                     pendingCount = pendingItems.size,
                     statusNote = statusNote,
                     selectedBanner = exam?.banner,
+                    node = pacsSettings.toNode(),
+                    callingAeTitle = pacsSettings.callingAeTitle,
+                    modality = pacsSettings.modality.ifBlank { "XC" },
                     onOpenPending = {
                         refreshPending()
                         destination = Destination.Pending
                     },
-                    onOpenWorklist = {
-                        if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS settings first"
-                            destination = Destination.Settings
-                        } else {
-                            destination = Destination.Worklist
-                        }
-                    },
-                    onOpenAppend = {
-                        if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS settings first"
-                            destination = Destination.Settings
-                        } else {
-                            destination = Destination.AppendStudy
-                        }
-                    },
-                    onContinueManual = {
-                        when {
-                            !patient.isValid() -> statusNote = "Patient ID and Name are required"
-                            !pacsSettings.isConfigured() -> {
-                                statusNote = "Configure PACS settings first"
-                                destination = Destination.Settings
-                            }
-                            else -> {
-                                statusNote = ""
-                                startNewSession(
-                                    ExamSelection(
-                                        context = PatientStudyContext(
-                                            patientId = patient.patientId.trim(),
-                                            patientName = patient.normalizedName(),
-                                            patientBirthDate = patient.birthDate.takeIf { it.length == 8 },
-                                            patientSex = patient.sex.takeIf { it.isNotBlank() },
-                                            accessionNumber = patient.accessionNumber.takeIf { it.isNotBlank() },
-                                            studyDescription = patient.studyDescription.takeIf { it.isNotBlank() },
-                                            modality = "XC",
-                                            seriesDescription = "Clinical photo/video session",
-                                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                                            laterality = patient.laterality.takeIf { it.isNotBlank() },
-                                        ),
-                                        source = ExamSource.MANUAL,
-                                    ),
-                                )
-                                audit.record("select_manual", patientId = patient.patientId)
-                                destination = Destination.Capture
-                            }
-                        }
-                    },
-                )
-
-                Destination.Settings -> SettingsScreen(
-                    initial = pacsSettings,
-                    onSave = { updated ->
+                    onOpenSettings = { selectMainTab(MainTab.Settings) },
+                    onQueryHl7 = {
                         scope.launch {
-                            settingsRepo.save(updated)
-                            statusNote = "Settings saved"
-                            destination = Destination.Patient
-                        }
-                    },
-                    onEcho = { draft ->
-                        scope.launch {
-                            statusNote = "C-ECHO..."
-                            val result = withContext(Dispatchers.IO) {
+                            statusNote = "HL7 ADT lookup…"
+                            diagnosticLog.log("hl7_lookup_start", patient.patientId.trim())
+                            val outcome = withContext(Dispatchers.IO) {
                                 runCatching {
-                                    PacsClient(draft.toNode()).use { it.echo() }
-                                }.getOrElse { EchoResult.Failed(it.message ?: "echo failed", it) }
+                                    nl.dicomcamera.identity.Hl7PatientDirectory(
+                                        configProvider = { pacsSettings.toHl7Config() },
+                                    ).findPatients(
+                                        nl.dicomcamera.identity.PatientQuery(
+                                            patientId = patient.patientId.trim(),
+                                            patientName = patient.patientName.trim().ifBlank { null },
+                                        ),
+                                    )
+                                }
                             }
-                            statusNote = when (result) {
-                                EchoResult.Success -> "C-ECHO OK"
-                                is EchoResult.Failed -> "C-ECHO failed: ${result.message}"
+                            outcome.onSuccess { list ->
+                                val hit = list.firstOrNull()
+                                if (hit == null) {
+                                    statusNote = "HL7: no patient found"
+                                    diagnosticLog.log("hl7_lookup", "no_patient")
+                                } else {
+                                    patient = patient.copy(
+                                        patientId = hit.patientId,
+                                        patientName = hit.patientName,
+                                        birthDate = hit.birthDate.orEmpty(),
+                                        sex = hit.sex.orEmpty(),
+                                    )
+                                    audit.record(
+                                        "hl7_lookup",
+                                        patientId = hit.patientId,
+                                        detail = hit.patientName,
+                                    )
+                                    diagnosticLog.log("hl7_lookup", "ok ${hit.patientId}")
+                                    statusNote = "HL7: filled ${hit.patientName}"
+                                }
+                            }.onFailure { e ->
+                                diagnosticLog.log("hl7_lookup", "failed ${e.message}")
+                                statusNote = "HL7 failed: ${e.message}"
                             }
                         }
                     },
-                    echoStatus = statusNote,
-                )
-
-                Destination.Worklist -> WorklistScreen(
-                    node = pacsSettings.toNode(),
-                    callingAeTitle = pacsSettings.callingAeTitle,
-                    onSelected = { entry: WorklistEntry ->
+                    onWorklistSelected = { entry: WorklistEntry ->
+                        if (!pacsSettings.isConfigured()) {
+                            statusNote = "Configure PACS in Settings first"
+                            selectMainTab(MainTab.Settings)
+                            return@WorklistTab
+                        }
                         val ctx = entry.toPatientStudyContext("Clinical photo/video session").copy(
                             bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
                             laterality = patient.laterality.takeIf { it.isNotBlank() },
@@ -336,37 +383,165 @@ fun Phase3App() {
                             studyUid = entry.studyInstanceUid.orEmpty(),
                             detail = entry.accessionNumber.orEmpty(),
                         )
+                        statusNote = ""
                         destination = Destination.Capture
+                    },
+                    onContinueManual = {
+                        when {
+                            !patient.isValid() -> statusNote = "Patient ID and Name are required"
+                            !pacsSettings.isConfigured() -> {
+                                statusNote = "Configure PACS in Settings first"
+                                selectMainTab(MainTab.Settings)
+                            }
+                            else -> {
+                                statusNote = ""
+                                startNewSession(
+                                    ExamSelection(
+                                        context = PatientStudyContext(
+                                            patientId = patient.patientId.trim(),
+                                            patientName = patient.normalizedName(),
+                                            patientBirthDate = patient.birthDate.takeIf { it.length == 8 },
+                                            patientSex = patient.sex.takeIf { it.isNotBlank() },
+                                            accessionNumber = patient.accessionNumber.takeIf { it.isNotBlank() },
+                                            studyDescription = patient.studyDescription.takeIf { it.isNotBlank() },
+                                            modality = pacsSettings.modality.ifBlank { "XC" },
+                                            seriesDescription = "Clinical photo/video session",
+                                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
+                                            laterality = patient.laterality.takeIf { it.isNotBlank() },
+                                        ),
+                                        source = ExamSource.MANUAL,
+                                    ),
+                                )
+                                audit.record("select_manual", patientId = patient.patientId)
+                                destination = Destination.Capture
+                            }
+                        }
                     },
                 )
 
-                Destination.AppendStudy -> AppendStudyScreen(
-                    node = pacsSettings.toNode(),
-                    onSelected = { entry: StudyEntry ->
-                        val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
-                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                            laterality = patient.laterality.takeIf { it.isNotBlank() },
-                        )
-                        startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
-                        patient = ManualPatientForm(
-                            patientId = entry.patientId,
-                            patientName = entry.patientName,
-                            birthDate = entry.patientBirthDate.orEmpty(),
-                            sex = entry.patientSex.orEmpty(),
-                            accessionNumber = entry.accessionNumber.orEmpty(),
-                            studyDescription = entry.studyDescription.orEmpty(),
-                            bodyPartExamined = patient.bodyPartExamined,
-                            laterality = patient.laterality,
-                        )
-                        audit.record(
-                            "select_append_study",
-                            patientId = entry.patientId,
-                            studyUid = entry.studyInstanceUid,
-                            detail = entry.accessionNumber.orEmpty(),
-                        )
-                        destination = Destination.Capture
+                Destination.Settings -> SettingsFlow(
+                    initial = pacsSettings,
+                    connectivityStatus = statusNote,
+                    logSummary = run {
+                        logUiTick
+                        val bytes = diagnosticLog.sizeBytes()
+                        val lines = diagnosticLog.lineCount()
+                        val state = if (diagnosticLog.enabled) "ON" else "OFF"
+                        "State $state · $lines lines · $bytes bytes"
                     },
+                    onSave = { updated ->
+                        scope.launch {
+                            settingsRepo.save(updated)
+                            diagnosticLog.setEnabled(updated.loggingEnabled)
+                            diagnosticLog.log("settings_saved", updated.remoteSummary())
+                            statusNote = "Settings saved"
+                            logUiTick++
+                            selectMainTab(MainTab.Settings)
+                        }
+                    },
+                    onPing = { draft ->
+                        scope.launch {
+                            statusNote = "Ping…"
+                            val result = withContext(Dispatchers.IO) {
+                                HostPing.ping(draft.host.trim())
+                            }
+                            diagnosticLog.log("ping", result.message)
+                            statusNote = result.message
+                            logUiTick++
+                        }
+                    },
+                    onEcho = { draft ->
+                        scope.launch {
+                            statusNote = "C-ECHO…"
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    PacsClient(draft.toNode()).use { it.echo() }
+                                }.getOrElse { EchoResult.Failed(it.message ?: "echo failed", it) }
+                            }
+                            statusNote = when (result) {
+                                EchoResult.Success -> "C-ECHO OK"
+                                is EchoResult.Failed -> "C-ECHO failed: ${result.message}"
+                            }
+                            diagnosticLog.log("c_echo", statusNote)
+                            logUiTick++
+                        }
+                    },
+                    onLoggingEnabledChange = { updated, enabled ->
+                        scope.launch {
+                            settingsRepo.save(updated.copy(loggingEnabled = enabled))
+                            diagnosticLog.setEnabled(enabled)
+                            statusNote = if (enabled) {
+                                "Logging enabled"
+                            } else {
+                                "Logging disabled"
+                            }
+                            logUiTick++
+                        }
+                    },
+                    onDownloadLog = {
+                        val name = "dicomcamera-diagnostic-${Instant.now().toString().replace(':', '-')}.log"
+                        downloadLogLauncher.launch(name)
+                    },
+                    onClearLog = {
+                        diagnosticLog.clear()
+                        statusNote = "Log cleared"
+                        logUiTick++
+                    },
+                    onTitleChange = { settingsTitle = it },
                 )
+
+                Destination.Archive -> {
+                    if (!pacsSettings.isConfigured()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            ScreenTitle(
+                                title = "Archive",
+                                subtitle = "Query existing studies to append photos or video.",
+                            )
+                            StatusBanner(
+                                text = "Configure PACS in Settings before querying the archive.",
+                                tone = StatusTone.Warn,
+                            )
+                            ForestButton(
+                                text = "Open Settings",
+                                onClick = { selectMainTab(MainTab.Settings) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        AppendStudyScreen(
+                            node = pacsSettings.toNode(),
+                            onSelected = { entry: StudyEntry ->
+                                val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
+                                    bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
+                                    laterality = patient.laterality.takeIf { it.isNotBlank() },
+                                )
+                                startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
+                                patient = ManualPatientForm(
+                                    patientId = entry.patientId,
+                                    patientName = entry.patientName,
+                                    birthDate = entry.patientBirthDate.orEmpty(),
+                                    sex = entry.patientSex.orEmpty(),
+                                    accessionNumber = entry.accessionNumber.orEmpty(),
+                                    studyDescription = entry.studyDescription.orEmpty(),
+                                    bodyPartExamined = patient.bodyPartExamined,
+                                    laterality = patient.laterality,
+                                )
+                                audit.record(
+                                    "select_append_study",
+                                    patientId = entry.patientId,
+                                    studyUid = entry.studyInstanceUid,
+                                    detail = entry.accessionNumber.orEmpty(),
+                                )
+                                destination = Destination.Capture
+                            },
+                        )
+                    }
+                }
 
                 Destination.Capture -> CaptureSessionScreen(
                     patientBanner = exam?.banner ?: "${patient.patientId} · ${patient.patientName}",
@@ -414,7 +589,7 @@ fun Phase3App() {
                     },
                     onDiscardSession = {
                         session = batchSender.discardSession(session)
-                        destination = Destination.Patient
+                        selectMainTab(lastMainTab)
                     },
                 )
 
@@ -425,7 +600,7 @@ fun Phase3App() {
                     success = resultSuccess,
                     pendingCount = pendingItems.size,
                     remainingInSession = session.pendingSendCount,
-                    onDone = { destination = Destination.Patient },
+                    onDone = { selectMainTab(lastMainTab) },
                     onBackToSession = { destination = Destination.Capture },
                     onPending = {
                         refreshPending()
@@ -498,18 +673,25 @@ private fun SendingScreen(progress: String) {
 }
 
 @Composable
-private fun PatientScreen(
+private fun WorklistTab(
     patient: ManualPatientForm,
     onPatientChange: (ManualPatientForm) -> Unit,
     pacsConfigured: Boolean,
+    hl7Configured: Boolean,
     pendingCount: Int,
     statusNote: String,
     selectedBanner: String?,
+    node: nl.dicomcamera.dicom.DicomNode,
+    callingAeTitle: String,
+    modality: String,
     onOpenPending: () -> Unit,
-    onOpenWorklist: () -> Unit,
-    onOpenAppend: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onQueryHl7: () -> Unit,
+    onWorklistSelected: (WorklistEntry) -> Unit,
     onContinueManual: () -> Unit,
 ) {
+    var mode by remember { mutableStateOf(WorklistMode.Worklist) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -519,16 +701,22 @@ private fun PatientScreen(
     ) {
         BrandWordmark(size = 22)
         ScreenTitle(
-            title = "Start a capture session",
-            subtitle = "Bind the exam, then capture photo and video for batch C-STORE.",
+            title = if (mode == WorklistMode.Worklist) "Worklist" else "Manual",
+            subtitle = if (mode == WorklistMode.Worklist) {
+                "Scheduled patients from the modality worklist."
+            } else {
+                "HL7 ADT demographics query or enter patient details by hand."
+            },
         )
 
-        if (!pacsConfigured) {
-            StatusBanner(
-                text = "PACS not configured yet. Open settings (gear) first.",
-                tone = StatusTone.Warn,
-            )
-        }
+        SegmentedChoice(
+            leftLabel = "Worklist",
+            rightLabel = "Manual",
+            leftSelected = mode == WorklistMode.Worklist,
+            onLeft = { mode = WorklistMode.Worklist },
+            onRight = { mode = WorklistMode.Manual },
+        )
+
         if (!selectedBanner.isNullOrBlank()) {
             StatusBanner(text = "Selected: $selectedBanner", tone = StatusTone.Info)
         }
@@ -536,71 +724,134 @@ private fun PatientScreen(
             StatusBanner(text = statusNote, tone = StatusTone.Info)
         }
 
-        SoftPanel {
-            SectionLabel("Path of care")
-            ForestButton(
-                text = "Modality worklist",
-                onClick = onOpenWorklist,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            QuietOutlinedButton(
-                text = "Append to existing study",
-                onClick = onOpenAppend,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        when (mode) {
+            WorklistMode.Worklist -> {
+                if (!pacsConfigured) {
+                    StatusBanner(
+                        text = "PACS not configured. Configure Remote DICOM in Settings to query the worklist.",
+                        tone = StatusTone.Warn,
+                    )
+                    QuietOutlinedButton(
+                        text = "Open Settings",
+                        onClick = onOpenSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    WorklistScreen(
+                        node = node,
+                        callingAeTitle = callingAeTitle,
+                        onSelected = onWorklistSelected,
+                        embedded = true,
+                        modality = modality,
+                    )
+                }
+            }
+            WorklistMode.Manual -> {
+                SoftPanel {
+                    SectionLabel("HL7 ADT query")
+                    Text(
+                        "Look up demographics on the hospital HL7 façade (ADT / QBP). Does not use DICOM C-ECHO.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DicomColors.Slate700,
+                    )
+                    DicomTextField(
+                        value = patient.patientId,
+                        onValueChange = { onPatientChange(patient.copy(patientId = it)) },
+                        label = "Patient ID *",
+                    )
+                    DicomTextField(
+                        value = patient.patientName,
+                        onValueChange = { onPatientChange(patient.copy(patientName = it)) },
+                        label = "Patient Name (optional for query)",
+                    )
+                    QuietOutlinedButton(
+                        text = if (hl7Configured) {
+                            "Query HL7 ADT"
+                        } else {
+                            "Query HL7 (configure in Settings)"
+                        },
+                        onClick = onQueryHl7,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = hl7Configured && patient.patientId.isNotBlank(),
+                    )
+                    if (!hl7Configured) {
+                        Text(
+                            "Enable Settings → HL7 demographics and set the façade URL.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DicomColors.Slate500,
+                        )
+                    }
+                }
 
-        SoftPanel {
-            SectionLabel("Manual demographics")
-            DicomTextField(
-                value = patient.patientId,
-                onValueChange = { onPatientChange(patient.copy(patientId = it)) },
-                label = "Patient ID *",
-            )
-            DicomTextField(
-                value = patient.patientName,
-                onValueChange = { onPatientChange(patient.copy(patientName = it)) },
-                label = "Patient Name * (FAMILY^GIVEN)",
-            )
-            DicomTextField(
-                value = patient.birthDate,
-                onValueChange = {
-                    onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
-                },
-                label = "Birth date (YYYYMMDD)",
-            )
-            SectionLabel("Sex")
-            ChoiceRow(
-                options = listOf("" to "-", "M" to "M", "F" to "F", "O" to "O"),
-                selected = patient.sex,
-                onSelect = { onPatientChange(patient.copy(sex = it)) },
-            )
-            DicomTextField(
-                value = patient.accessionNumber,
-                onValueChange = { onPatientChange(patient.copy(accessionNumber = it)) },
-                label = "Accession (optional)",
-            )
-            DicomTextField(
-                value = patient.studyDescription,
-                onValueChange = { onPatientChange(patient.copy(studyDescription = it)) },
-                label = "Study description (optional)",
-            )
-            DicomTextField(
-                value = patient.bodyPartExamined,
-                onValueChange = { onPatientChange(patient.copy(bodyPartExamined = it.uppercase())) },
-                label = "Body part (e.g. HAND, FOOT)",
-            )
-            SectionLabel("Laterality")
-            ChoiceRow(
-                options = listOf("" to "-", "L" to "L", "R" to "R", "U" to "U"),
-                selected = patient.laterality,
-                onSelect = { onPatientChange(patient.copy(laterality = it)) },
-            )
-            ForestButton(
-                text = "Continue with manual patient",
-                onClick = onContinueManual,
-                modifier = Modifier.fillMaxWidth(),
-            )
+                SoftPanel {
+                    SectionLabel("Patient details")
+                    Text(
+                        "Edit fields after HL7 lookup, or enter everything manually.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DicomColors.Slate700,
+                    )
+                    DicomTextField(
+                        value = patient.patientId,
+                        onValueChange = { onPatientChange(patient.copy(patientId = it)) },
+                        label = "Patient ID *",
+                    )
+                    DicomTextField(
+                        value = patient.patientName,
+                        onValueChange = { onPatientChange(patient.copy(patientName = it)) },
+                        label = "Patient Name * (FAMILY^GIVEN)",
+                    )
+                    DicomTextField(
+                        value = patient.birthDate,
+                        onValueChange = {
+                            onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
+                        },
+                        label = "Birth date (YYYYMMDD)",
+                    )
+                    SectionLabel("Sex")
+                    ChoiceRow(
+                        options = listOf("" to "-", "M" to "M", "F" to "F", "O" to "O"),
+                        selected = patient.sex,
+                        onSelect = { onPatientChange(patient.copy(sex = it)) },
+                    )
+                    DicomTextField(
+                        value = patient.accessionNumber,
+                        onValueChange = { onPatientChange(patient.copy(accessionNumber = it)) },
+                        label = "Accession (optional)",
+                    )
+                    DicomTextField(
+                        value = patient.studyDescription,
+                        onValueChange = { onPatientChange(patient.copy(studyDescription = it)) },
+                        label = "Study description (optional)",
+                    )
+                    DicomTextField(
+                        value = patient.bodyPartExamined,
+                        onValueChange = { onPatientChange(patient.copy(bodyPartExamined = it.uppercase())) },
+                        label = "Body part (e.g. HAND, FOOT)",
+                    )
+                    SectionLabel("Laterality")
+                    ChoiceRow(
+                        options = listOf("" to "-", "L" to "L", "R" to "R", "U" to "U"),
+                        selected = patient.laterality,
+                        onSelect = { onPatientChange(patient.copy(laterality = it)) },
+                    )
+                    if (!pacsConfigured) {
+                        StatusBanner(
+                            text = "Configure Remote DICOM in Settings before sending captures.",
+                            tone = StatusTone.Warn,
+                        )
+                        QuietOutlinedButton(
+                            text = "Open Settings",
+                            onClick = onOpenSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    ForestButton(
+                        text = "Continue with this patient",
+                        onClick = onContinueManual,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
 
         if (pendingCount > 0) {
@@ -642,98 +893,6 @@ private fun ChoiceRow(
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(end = 8.dp),
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsScreen(
-    initial: PacsSettings,
-    onSave: (PacsSettings) -> Unit,
-    onEcho: (PacsSettings) -> Unit,
-    echoStatus: String,
-) {
-    var draft by remember(initial) { mutableStateOf(initial) }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        ScreenTitle(
-            title = "PACS connection",
-            subtitle = "DIMSE endpoint used for worklist, append, and C-STORE.",
-        )
-        SoftPanel {
-            SectionLabel("Endpoint")
-            DicomTextField(
-                value = draft.host,
-                onValueChange = { draft = draft.copy(host = it) },
-                label = "PACS host",
-            )
-            DicomTextField(
-                value = draft.port.toString(),
-                onValueChange = { text ->
-                    draft = draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port)
-                },
-                label = "PACS port",
-            )
-            DicomTextField(
-                value = draft.calledAeTitle,
-                onValueChange = { draft = draft.copy(calledAeTitle = it) },
-                label = "Called AE Title",
-            )
-            DicomTextField(
-                value = draft.callingAeTitle,
-                onValueChange = { draft = draft.copy(callingAeTitle = it) },
-                label = "Calling AE Title",
-            )
-        }
-        SoftPanel {
-            SectionLabel("DICOM TLS")
-            Text(
-                text = "Uses system trust store; hospital CA install via MDM later.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (draft.useTls) "TLS enabled" else "TLS disabled",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Switch(
-                    checked = draft.useTls,
-                    onCheckedChange = { draft = draft.copy(useTls = it) },
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = DicomColors.Forest,
-                        checkedThumbColor = DicomColors.White,
-                        uncheckedTrackColor = DicomColors.Hairline,
-                        uncheckedThumbColor = DicomColors.Slate500,
-                    ),
-                )
-            }
-            QuietOutlinedButton(
-                text = "Test C-ECHO",
-                onClick = { onEcho(draft) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            ForestButton(
-                text = "Save settings",
-                onClick = { onSave(draft) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (echoStatus.isNotBlank()) {
-                val tone = when {
-                    echoStatus.contains("OK") -> StatusTone.Success
-                    echoStatus.contains("failed", ignoreCase = true) -> StatusTone.Error
-                    else -> StatusTone.Info
-                }
-                StatusBanner(text = echoStatus, tone = tone)
             }
         }
     }

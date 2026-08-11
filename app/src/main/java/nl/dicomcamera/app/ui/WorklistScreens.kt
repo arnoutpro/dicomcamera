@@ -2,13 +2,17 @@ package nl.dicomcamera.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,6 +33,7 @@ import nl.dicomcamera.app.ui.components.MetaChip
 import nl.dicomcamera.app.ui.components.ResultRow
 import nl.dicomcamera.app.ui.components.ScreenTitle
 import nl.dicomcamera.app.ui.components.SectionLabel
+import nl.dicomcamera.app.ui.components.SegmentedChoice
 import nl.dicomcamera.app.ui.components.SoftPanel
 import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
@@ -39,93 +45,157 @@ import nl.dicomcamera.dicom.StudyEntry
 import nl.dicomcamera.dicom.StudyQuery
 import nl.dicomcamera.dicom.WorklistEntry
 import nl.dicomcamera.dicom.WorklistQuery
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+private enum class WorklistDateMode {
+    Today,
+    Date,
+}
+
+private enum class WorklistSort {
+    Time,
+    Name,
+    PatientId,
+    Accession,
+}
 
 @Composable
 fun WorklistScreen(
     node: DicomNode,
     callingAeTitle: String,
     onSelected: (WorklistEntry) -> Unit,
+    embedded: Boolean = false,
+    modality: String = "XC",
 ) {
     val scope = rememberCoroutineScope()
+    var dateMode by remember { mutableStateOf(WorklistDateMode.Today) }
+    var customDate by remember {
+        mutableStateOf(LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE))
+    }
+    var sort by remember { mutableStateOf(WorklistSort.Time) }
     var patientId by remember { mutableStateOf("") }
     var accession by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<WorklistEntry>>(emptyList()) }
-    var status by remember { mutableStateOf("Query today's XC worklist") }
+    var status by remember { mutableStateOf("Query today's worklist") }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        ScreenTitle(
-            title = "Modality worklist",
-            subtitle = "Select a scheduled XC exam to bind this capture session.",
-        )
+    val today = remember { LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) }
+    val sortedItems = remember(items, sort) { items.sortedWith(worklistComparator(sort)) }
+
+    fun runQuery() {
+        val scheduledDate = when (dateMode) {
+            WorklistDateMode.Today -> today
+            WorklistDateMode.Date -> customDate.trim()
+        }
+        if (dateMode == WorklistDateMode.Date && scheduledDate.length != 8) {
+            status = "Enter scheduled date as YYYYMMDD"
+            failed = true
+            return
+        }
+        loading = true
+        failed = false
+        status = "Querying MWL…"
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PacsClient(node).use {
+                    it.findWorklist(
+                        WorklistQuery(
+                            patientId = patientId.trim().ifBlank { null },
+                            accessionNumber = accession.trim().ifBlank { null },
+                            modality = modality.ifBlank { "XC" },
+                            scheduledStationAeTitle = callingAeTitle,
+                            scheduledDate = scheduledDate,
+                        ),
+                    )
+                }
+            }
+            loading = false
+            when (result) {
+                is FindResult.Success -> {
+                    items = result.items
+                    val label = if (dateMode == WorklistDateMode.Today) "today" else scheduledDate
+                    status = "${result.items.size} worklist item(s) · $label"
+                    failed = false
+                }
+                is FindResult.Failed -> {
+                    items = emptyList()
+                    status = "MWL failed: ${result.message}"
+                    failed = true
+                }
+            }
+        }
+    }
+
+    val body: @Composable () -> Unit = {
+        if (!embedded) {
+            ScreenTitle(
+                title = "Modality worklist",
+                subtitle = "Select a scheduled exam to bind this capture session.",
+            )
+        }
+
         SoftPanel {
-            SectionLabel("Filters")
+            SectionLabel("Date")
+            SegmentedChoice(
+                leftLabel = "Today",
+                rightLabel = "Date",
+                leftSelected = dateMode == WorklistDateMode.Today,
+                onLeft = {
+                    dateMode = WorklistDateMode.Today
+                    customDate = today
+                },
+                onRight = { dateMode = WorklistDateMode.Date },
+            )
+            if (dateMode == WorklistDateMode.Date) {
+                DicomTextField(
+                    value = customDate,
+                    onValueChange = { customDate = it.filter { ch -> ch.isDigit() }.take(8) },
+                    label = "Scheduled date (YYYYMMDD)",
+                )
+            } else {
+                Text(
+                    "Scheduled date = $today",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DicomColors.Slate700,
+                )
+            }
+
+            SectionLabel("Optional filters")
             DicomTextField(
                 value = patientId,
                 onValueChange = { patientId = it },
-                label = "Patient ID filter",
+                label = "Patient ID",
             )
             DicomTextField(
                 value = accession,
                 onValueChange = { accession = it },
-                label = "Accession filter",
+                label = "Accession",
             )
+
+            SectionLabel("Sort by")
+            WorklistSortRow(
+                selected = sort,
+                onSelect = { sort = it },
+            )
+
             ForestButton(
                 text = "Query worklist",
-                onClick = {
-                    loading = true
-                    failed = false
-                    status = "Querying MWL..."
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            PacsClient(node).use {
-                                it.findWorklist(
-                                    WorklistQuery(
-                                        patientId = patientId.trim().ifBlank { null },
-                                        accessionNumber = accession.trim().ifBlank { null },
-                                        modality = "XC",
-                                        scheduledStationAeTitle = callingAeTitle,
-                                    ),
-                                )
-                            }
-                        }
-                        loading = false
-                        when (result) {
-                            is FindResult.Success -> {
-                                items = result.items
-                                status = "${items.size} worklist item(s)"
-                                failed = false
-                            }
-                            is FindResult.Failed -> {
-                                items = emptyList()
-                                status = "MWL failed: ${result.message}"
-                                failed = true
-                            }
-                        }
-                    }
-                },
+                onClick = { runQuery() },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
             )
         }
 
         if (loading) {
-            SoftPanel {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CircularProgressIndicator(color = DicomColors.Forest)
-                    Text("Querying modality worklist…", style = MaterialTheme.typography.bodySmall)
-                }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CircularProgressIndicator(color = DicomColors.Forest)
+                Text("Querying modality worklist…", style = MaterialTheme.typography.bodySmall)
             }
         } else {
             StatusBanner(
@@ -134,13 +204,23 @@ fun WorklistScreen(
             )
         }
 
-        items.forEach { entry ->
+        if (sortedItems.isEmpty() && !loading && !failed) {
+            Text(
+                "No patients on the worklist for this filter.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate500,
+            )
+        }
+
+        sortedItems.forEach { entry ->
             ResultRow(
                 title = "${entry.patientId} · ${entry.patientName}",
                 subtitle = listOfNotNull(
                     entry.accessionNumber?.let { "Acc $it" },
                     entry.modality,
-                    entry.scheduledStartDate,
+                    listOfNotNull(entry.scheduledStartDate, entry.scheduledStartTime)
+                        .joinToString(" ")
+                        .ifBlank { null },
                     entry.studyDescription,
                 ).joinToString(" · "),
                 onClick = { onSelected(entry) },
@@ -150,7 +230,82 @@ fun WorklistScreen(
             )
         }
     }
+
+    if (embedded) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = { body() })
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            body()
+        }
+    }
 }
+
+@Composable
+private fun WorklistSortRow(
+    selected: WorklistSort,
+    onSelect: (WorklistSort) -> Unit,
+) {
+    val options = listOf(
+        WorklistSort.Time to "Time",
+        WorklistSort.Name to "Name",
+        WorklistSort.PatientId to "Patient ID",
+        WorklistSort.Accession to "Accession",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        options.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                row.forEach { (value, label) ->
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .selectable(
+                                selected = selected == value,
+                                onClick = { onSelect(value) },
+                                role = Role.RadioButton,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = selected == value,
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = DicomColors.Forest,
+                                unselectedColor = DicomColors.Slate400,
+                            ),
+                        )
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+                if (row.size == 1) {
+                    // keep alignment when odd count
+                }
+            }
+        }
+    }
+}
+
+private fun worklistComparator(sort: WorklistSort): Comparator<WorklistEntry> =
+    when (sort) {
+        WorklistSort.Time -> compareBy<WorklistEntry>(
+            { it.scheduledStartDate.orEmpty() },
+            { it.scheduledStartTime.orEmpty() },
+            { it.patientName },
+        )
+        WorklistSort.Name -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.patientName }
+        WorklistSort.PatientId -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.patientId }
+        WorklistSort.Accession -> compareBy(String.CASE_INSENSITIVE_ORDER) {
+            it.accessionNumber.orEmpty()
+        }
+    }
 
 @Composable
 fun AppendStudyScreen(
@@ -173,7 +328,7 @@ fun AppendStudyScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         ScreenTitle(
-            title = "Append to study",
+            title = "Archive",
             subtitle = "Find an existing study, then add clinical photo/video to it.",
         )
         SoftPanel {

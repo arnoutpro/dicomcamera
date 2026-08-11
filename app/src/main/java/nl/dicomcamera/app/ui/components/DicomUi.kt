@@ -3,6 +3,7 @@ package nl.dicomcamera.app.ui.components
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,15 +47,49 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import nl.dicomcamera.app.R
 import nl.dicomcamera.app.ui.theme.BrandGradient
 import nl.dicomcamera.app.ui.theme.DicomColors
 import nl.dicomcamera.app.ui.theme.DicomShapes
 import nl.dicomcamera.app.ui.theme.DicomType
+
+@Composable
+fun BrandLogo(
+    modifier: Modifier = Modifier,
+    showWordmark: Boolean = true,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.brand_logo),
+            contentDescription = "DICOM Camera",
+            modifier = Modifier.size(32.dp),
+            contentScale = ContentScale.Fit,
+        )
+        if (showWordmark) {
+            Text(
+                text = "DICOM Camera",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DicomColors.Ink,
+                    letterSpacing = (-0.3).sp,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
 
 @Composable
 fun BrandWordmark(
@@ -460,8 +495,12 @@ fun DicomTextField(
 
 @Composable
 fun ChromeTopBar(
-    title: String,
-    subtitle: String? = null,
+    /**
+     * When true (main tabs), show brand logo only — bottom nav already names the screen.
+     * When false (nested flows), show optional back + a single title.
+     */
+    branded: Boolean,
+    title: String = "",
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -470,34 +509,29 @@ fun ChromeTopBar(
             .fillMaxWidth()
             .background(DicomColors.Chrome)
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (navigationIcon != null) {
-            navigationIcon()
-        }
-        Column(modifier = Modifier.weight(1f)) {
+        if (branded) {
+            BrandLogo(modifier = Modifier.weight(1f))
+            actions()
+        } else {
+            if (navigationIcon != null) {
+                navigationIcon()
+            }
             Text(
-                title,
+                text = title,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.ExtraBold,
                     color = DicomColors.Ink,
                 ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    subtitle,
-                    fontFamily = DicomType.Mono,
-                    style = MaterialTheme.typography.bodySmall.copy(color = DicomColors.ForestMid),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            actions()
         }
-        actions()
     }
 }
 
@@ -519,8 +553,8 @@ fun ChromeBottomBar(
             .background(DicomColors.Chrome)
             .border(BorderStroke(1.dp, DicomColors.Hairline))
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BottomTabItem(
@@ -556,11 +590,15 @@ private fun BottomTabItem(
     modifier: Modifier = Modifier,
 ) {
     val fg = if (selected) DicomColors.Forest else DicomColors.Slate500
+    val bg = if (selected) DicomColors.White else Color.Transparent
+    val border = if (selected) DicomColors.Forest.copy(alpha = 0.35f) else Color.Transparent
     Column(
         modifier = modifier
             .clip(DicomShapes.Chip)
+            .background(bg)
+            .border(1.dp, border, DicomShapes.Chip)
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 4.dp),
+            .padding(vertical = 8.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

@@ -14,11 +14,11 @@ class PacsEchoStoreSpikeTest {
     @get:Rule
     val temp = TemporaryFolder()
 
-    private lateinit var scp: InProcessStoreScp
+    private lateinit var scp: InProcessDicomScp
 
     @Before
     fun setUp() {
-        scp = InProcessStoreScp(storageDir = temp.newFolder("pacs"))
+        scp = InProcessDicomScp(storageDir = temp.newFolder("pacs"))
         scp.start()
     }
 

@@ -108,7 +108,13 @@ fun SessionWorkflow(
                 studyDescription = form.studyDescription.takeIf { it.isNotBlank() },
                 bodyPartExamined = form.bodyPartExamined.takeIf { it.isNotBlank() },
                 laterality = form.laterality.takeIf { it.isNotBlank() },
-                seriesDescription = "Clinical photo/video · ${form.bodyPartExamined}",
+                seriesDescription = buildString {
+                    append("Clinical photo/video")
+                    if (form.bodyPartExamined.isNotBlank()) {
+                        append(" · ")
+                        append(form.bodyPartExamined)
+                    }
+                },
             ),
         )
     }
@@ -247,7 +253,6 @@ fun SessionWorkflow(
                 onSessionChange(batchSender.discardSession(session))
                 onCancelWorkflow()
             },
-            worklistHint = worklistHint,
         )
 
         SessionStep.Review -> {
@@ -269,7 +274,13 @@ fun SessionWorkflow(
                 onArchiveToPacs = {
                     val currentExam = syncExamFromPatient(patient)?.also(onExamChange) ?: exam
                     if (currentExam == null) return@ReviewSessionScreen
-                    if (!pacsSettings.isConfigured()) return@ReviewSessionScreen
+                    if (!pacsSettings.isConfigured()) {
+                        diagnosticLog.log(
+                            "archive_pacs",
+                            "PACS not configured — encoding and queuing locally",
+                        )
+                        onStatus("PACS not configured — items will go to the pending queue")
+                    }
                     onStepChange(SessionStep.Archiving)
                     sendProgress = "Starting…"
                     sendFraction = 0f
@@ -295,7 +306,11 @@ fun SessionWorkflow(
                         resultMessage = outcome.message
                         diagnosticLog.log(
                             "archive_pacs",
-                            if (outcome.allSucceeded) "ok ${outcome.successCount}" else "fail ${outcome.message}",
+                            if (outcome.allSucceeded) {
+                                "ok ${outcome.successCount}"
+                            } else {
+                                "fail queued=${outcome.failureCount} ${outcome.message}"
+                            },
                         )
                         if (outcome.allSucceeded) {
                             // NEVER keep images after successful PACS store
@@ -343,9 +358,10 @@ fun SessionWorkflow(
                 MarkupScreen(
                     item = item,
                     staging = staging,
-                    onSaved = { updated ->
-                        staging.wipe(item.rawFile)
-                        onSessionChange(session.update(item.id) { updated })
+                    onSaved = { markedUp ->
+                        // Keep the original; mark-up is an additional capture in the session.
+                        onSessionChange(session.add(markedUp))
+                        diagnosticLog.log("markup_saved", "original=${item.id} markup=${markedUp.id}")
                         markupItem = null
                         onStepChange(SessionStep.Review)
                     },

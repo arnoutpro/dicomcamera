@@ -2,9 +2,9 @@ package nl.dicomcamera.app.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Paint
 import android.media.MediaMetadataRetriever
+import android.widget.VideoView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -42,13 +43,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import nl.dicomcamera.app.session.BodyParts
 import nl.dicomcamera.app.session.CaptureKind
 import nl.dicomcamera.app.session.CaptureSession
@@ -70,7 +72,7 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Step 1–2: clear demographics + body-part selection, then open system camera.
+ * Step 1–2: patient demographics + optional body part, then system camera.
  */
 @Composable
 fun PatientSetupScreen(
@@ -79,7 +81,6 @@ fun PatientSetupScreen(
     onCapturePhoto: () -> Unit,
     onCaptureVideo: () -> Unit,
     onCancel: () -> Unit,
-    worklistHint: String? = null,
 ) {
     Column(
         modifier = Modifier
@@ -88,17 +89,6 @@ fun PatientSetupScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        if (!worklistHint.isNullOrBlank()) {
-            SoftPanel {
-                SectionLabel("From worklist")
-                Text(worklistHint, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "Name, birth date, and sex start empty - enter or confirm them below.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DicomColors.Slate700,
-                )
-            }
-        }
         SoftPanel {
             SectionLabel("Patient details")
             Text(
@@ -132,9 +122,9 @@ fun PatientSetupScreen(
         }
 
         SoftPanel {
-            SectionLabel("Body part *")
+            SectionLabel("Body part")
             Text(
-                "Select the anatomic region for this series.",
+                "Optional anatomic region for this series.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
@@ -150,9 +140,7 @@ fun PatientSetupScreen(
             )
         }
 
-        val canCapture = patient.patientId.isNotBlank() &&
-            patient.patientName.isNotBlank() &&
-            patient.bodyPartExamined.isNotBlank()
+        val canCapture = patient.patientId.isNotBlank() && patient.patientName.isNotBlank()
 
         ForestButton(
             text = "Capture photo",
@@ -168,7 +156,7 @@ fun PatientSetupScreen(
         )
         if (!canCapture) {
             Text(
-                "Fill Name and select a body part to capture.",
+                "Patient ID and Name are required to capture.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate500,
             )
@@ -304,9 +292,13 @@ fun ReviewSessionScreen(
         }
 
         ForestButton(
-            text = if (pacsConfigured) "Archive to PACS" else "Archive to PACS (configure PACS first)",
+            text = if (pacsConfigured) {
+                "Archive to PACS"
+            } else {
+                "Archive to PACS (queue if not configured)"
+            },
             onClick = onArchiveToPacs,
-            enabled = session.pendingSendCount > 0 && pacsConfigured,
+            enabled = session.pendingSendCount > 0,
             modifier = Modifier.fillMaxWidth(),
         )
         QuietOutlinedButton(
@@ -316,7 +308,7 @@ fun ReviewSessionScreen(
         )
         if (!pacsConfigured) {
             Text(
-                "Configure Remote DICOM in Settings before archiving.",
+                "Remote DICOM is not configured yet. Archive will encode and place items in the pending queue.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate500,
             )
@@ -361,7 +353,7 @@ private fun ReviewThumb(
                 Text(item.label, style = MaterialTheme.typography.labelMedium)
             }
             MetaChip(
-                text = if (item.kind == CaptureKind.VIDEO) "Video" else "Photo",
+                text = item.label,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(4.dp),
@@ -380,46 +372,136 @@ private fun Modifier.clipBackground(): Modifier =
         .background(DicomColors.White, DicomShapes.Thumb)
         .border(1.dp, DicomColors.Hairline, DicomShapes.Thumb)
 
-private fun loadThumbBitmap(item: SessionItem): Bitmap? {
-    if (!item.rawFile.exists()) return null
+/** Thumbnail decode (~320px). */
+private fun loadThumbBitmap(item: SessionItem): Bitmap? =
+    loadBitmapForDisplay(item, maxEdge = 320)
+
+/** Review / mark-up display decode (~1600px) — avoids stretching a 256px thumb. */
+private fun loadPreviewBitmap(item: SessionItem): Bitmap? =
+    loadBitmapForDisplay(item, maxEdge = 1600)
+
+private fun loadBitmapForDisplay(item: SessionItem, maxEdge: Int): Bitmap? {
+    if (!item.rawFile.exists() || item.rawFile.length() == 0L) return null
     return try {
         when (item.kind) {
             CaptureKind.PHOTO -> {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(item.rawFile.absolutePath, bounds)
-                val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 256)
-                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+                val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / maxEdge)
+                val opts = BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
                 BitmapFactory.decodeFile(item.rawFile.absolutePath, opts)
             }
-            CaptureKind.VIDEO -> {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(item.rawFile.absolutePath)
-                    retriever.getFrameAtTime(0)
-                } finally {
-                    runCatching { retriever.release() }
-                }
-            }
+            CaptureKind.VIDEO -> loadVideoFrame(item.rawFile, maxEdge)
         }
     } catch (_: Exception) {
         null
     }
 }
 
+private fun loadVideoFrame(file: File, maxEdge: Int): Bitmap? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(file.absolutePath)
+        val durationMs = retriever.extractMetadata(
+            MediaMetadataRetriever.METADATA_KEY_DURATION,
+        )?.toLongOrNull() ?: 0L
+        val candidatesUs = listOf(
+            0L,
+            1_000_000L,
+            (durationMs * 1000L) / 2,
+        ).distinct()
+        for (timeUs in candidatesUs) {
+            val frame = if (android.os.Build.VERSION.SDK_INT >= 27) {
+                retriever.getScaledFrameAtTime(
+                    timeUs,
+                    MediaMetadataRetriever.OPTION_CLOSEST,
+                    maxEdge,
+                    maxEdge,
+                )
+            } else {
+                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+            if (frame != null) return frame
+        }
+        null
+    } catch (_: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
 @Composable
 private fun ReviewFullPreview(item: SessionItem) {
-    val bmp = remember(item.id) { loadThumbBitmap(item) }
-    if (bmp != null) {
-        Image(
-            bitmap = bmp.asImageBitmap(),
-            contentDescription = item.label,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp),
-            contentScale = ContentScale.Fit,
-        )
-    } else {
-        Text("Preview unavailable", color = DicomColors.Slate500)
+    when (item.kind) {
+        CaptureKind.PHOTO -> {
+            val bmp = remember(item.id, item.rawFile.path) { loadPreviewBitmap(item) }
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = item.label,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 280.dp, max = 480.dp),
+                    contentScale = ContentScale.Fit,
+                    filterQuality = FilterQuality.High,
+                )
+            } else {
+                Text("Preview unavailable", color = DicomColors.Slate500)
+            }
+        }
+        CaptureKind.VIDEO -> {
+            if (!item.rawFile.exists()) {
+                Text("Video file missing", color = DicomColors.Slate500)
+                return
+            }
+            var playError by remember(item.id) { mutableStateOf<String?>(null) }
+            val thumb = remember(item.id, item.rawFile.path) { loadPreviewBitmap(item) }
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        setVideoPath(item.rawFile.absolutePath)
+                        setOnPreparedListener { mp ->
+                            mp.isLooping = true
+                            start()
+                        }
+                        setOnErrorListener { _, what, extra ->
+                            playError = "Video play error ($what/$extra)"
+                            true
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .background(DicomColors.Ink),
+                update = { view ->
+                    if (view.tag != item.rawFile.absolutePath) {
+                        view.tag = item.rawFile.absolutePath
+                        view.setVideoPath(item.rawFile.absolutePath)
+                        view.start()
+                    }
+                },
+            )
+            if (playError != null) {
+                Text(playError!!, color = DicomColors.Rose, style = MaterialTheme.typography.bodySmall)
+                if (thumb != null) {
+                    Image(
+                        bitmap = thumb.asImageBitmap(),
+                        contentDescription = item.label,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp),
+                        contentScale = ContentScale.Fit,
+                        filterQuality = FilterQuality.High,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -432,10 +514,16 @@ fun MarkupScreen(
 ) {
     val strokes = remember { mutableStateListOf<List<Offset>>() }
     var current by remember { mutableStateOf<List<Offset>>(emptyList()) }
-    val base = remember(item.id) {
-        BitmapFactory.decodeFile(item.rawFile.absolutePath)
+    var canvasSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    // Full-resolution source for baking; display uses a sharper downsample.
+    val baseFull = remember(item.id, item.rawFile.path) {
+        BitmapFactory.decodeFile(
+            item.rawFile.absolutePath,
+            BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
+        )
     }
-    val imageBitmap = remember(base) { base?.asImageBitmap() }
+    val displayBmp = remember(item.id, item.rawFile.path) { loadPreviewBitmap(item) }
+    val imageBitmap = remember(displayBmp) { displayBmp?.asImageBitmap() }
 
     Column(
         modifier = Modifier
@@ -446,12 +534,12 @@ fun MarkupScreen(
         SoftPanel {
             SectionLabel("Mark up")
             Text(
-                "Draw on the photo, then save. Replaces this capture in the current session.",
+                "Draw on the photo, then save. Creates a new image — the original stays in the session.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
         }
-        if (imageBitmap == null || base == null) {
+        if (imageBitmap == null || baseFull == null || displayBmp == null) {
             StatusBanner(text = "Could not load photo for mark-up", tone = StatusTone.Error)
         } else {
             Box(
@@ -478,6 +566,7 @@ fun MarkupScreen(
                             )
                         },
                 ) {
+                    canvasSize = size
                     val scale = minOf(size.width / imageBitmap.width, size.height / imageBitmap.height)
                     val dw = imageBitmap.width * scale
                     val dh = imageBitmap.height * scale
@@ -486,7 +575,11 @@ fun MarkupScreen(
                     drawImage(
                         image = imageBitmap,
                         dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
-                        dstSize = androidx.compose.ui.unit.IntSize(dw.toInt().coerceAtLeast(1), dh.toInt().coerceAtLeast(1)),
+                        dstSize = androidx.compose.ui.unit.IntSize(
+                            dw.toInt().coerceAtLeast(1),
+                            dh.toInt().coerceAtLeast(1),
+                        ),
+                        filterQuality = FilterQuality.High,
                     )
                     val strokeColor = Color(0xFFE11D48)
                     (strokes + listOf(current)).forEach { path ->
@@ -508,8 +601,10 @@ fun MarkupScreen(
             ForestButton(
                 text = "Save mark-up",
                 onClick = {
-                    val src = base ?: return@ForestButton
-                    val out = staging.createStagingFile("markup", "jpg")
+                    val src = baseFull ?: return@ForestButton
+                    val display = displayBmp ?: return@ForestButton
+                    val outDir = File(staging.directory, "camera").also { it.mkdirs() }
+                    val out = File(outDir, "markup-${System.currentTimeMillis()}.jpg")
                     val baked = src.copy(Bitmap.Config.ARGB_8888, true)
                     val canvas = android.graphics.Canvas(baked)
                     val paint = Paint().apply {
@@ -520,17 +615,23 @@ fun MarkupScreen(
                         strokeCap = Paint.Cap.ROUND
                         strokeJoin = Paint.Join.ROUND
                     }
-                    // Best-effort: strokes are in view coords; scale roughly to bitmap width
-                    val viewW = 1000f
-                    val sx = src.width / viewW
-                    val sy = src.height / viewW
+                    // Map strokes from view coords → full bitmap using the same letterbox as the canvas.
+                    val viewW = canvasSize.width.coerceAtLeast(1f)
+                    val viewH = canvasSize.height.coerceAtLeast(1f)
+                    val fit = minOf(viewW / display.width, viewH / display.height)
+                    val dw = display.width * fit
+                    val dh = display.height * fit
+                    val left = (viewW - dw) / 2f
+                    val top = (viewH - dh) / 2f
+                    val sx = src.width / dw
+                    val sy = src.height / dh
                     strokes.forEach { path ->
                         for (i in 1 until path.size) {
                             canvas.drawLine(
-                                path[i - 1].x * sx,
-                                path[i - 1].y * sy,
-                                path[i].x * sx,
-                                path[i].y * sy,
+                                (path[i - 1].x - left) * sx,
+                                (path[i - 1].y - top) * sy,
+                                (path[i].x - left) * sx,
+                                (path[i].y - top) * sy,
                                 paint,
                             )
                         }
@@ -540,11 +641,13 @@ fun MarkupScreen(
                     }
                     baked.recycle()
                     onSaved(
-                        item.copy(
+                        SessionItem(
+                            kind = CaptureKind.PHOTO,
                             rawFile = out,
                             rows = src.height,
                             columns = src.width,
                             status = SessionItemStatus.STAGED,
+                            displayLabel = "Mark-up",
                         ),
                     )
                 },

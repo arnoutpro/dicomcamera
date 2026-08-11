@@ -60,16 +60,82 @@ class SessionBatchSender(
         var working = session
         var successCount = 0
         var failureCount = 0
-        val batch = BatchStore(
-            clientFactory = { PacsClient(settings.toNode()) },
-            maxAttempts = 3,
-            initialBackoffMs = 400,
-        )
         val encodeContext = examContext.copy(
             studyInstanceUid = session.studyInstanceUid,
             seriesInstanceUid = session.seriesInstanceUid,
             seriesDescription = examContext.seriesDescription
                 ?: "Clinical photo/video session",
+        )
+
+        // When Remote DICOM is not configured, still encode and park in the pending queue.
+        if (!settings.isConfigured()) {
+            toSend.forEachIndexed { index, item ->
+                working = working.update(item.id) { it.copy(status = SessionItemStatus.ENCODING, error = null) }
+                onProgress(
+                    BatchSendProgress(
+                        currentIndex = index + 1,
+                        total = toSend.size,
+                        itemId = item.id,
+                        status = SessionItemStatus.ENCODING,
+                        message = "Encoding ${item.label} ${index + 1}/${toSend.size} (PACS not configured)",
+                    ),
+                )
+                val dicomFile = item.dicomFile?.takeIf { it.exists() }
+                    ?: staging.createStagingFile(if (item.kind == CaptureKind.PHOTO) "vl" else "vid", "dcm")
+                try {
+                    when (item.kind) {
+                        CaptureKind.PHOTO -> encodePhoto(item, encodeContext, dicomFile)
+                        CaptureKind.VIDEO -> encodeVideo(item, encodeContext, dicomFile)
+                    }
+                    val err = "PACS not configured"
+                    pendingQueue.enqueue(
+                        dicomFile = dicomFile,
+                        rawFile = item.rawFile.takeIf { it.exists() },
+                        patientId = encodeContext.patientId,
+                        patientName = encodeContext.patientName,
+                        error = err,
+                    )
+                    audit.record(
+                        action = "c_store_queued_unconfigured",
+                        patientId = encodeContext.patientId,
+                        studyUid = session.studyInstanceUid,
+                        detail = "$examSource;${item.kind};$err",
+                    )
+                    working = working.update(item.id) {
+                        it.copy(status = SessionItemStatus.FAILED, dicomFile = null, error = err)
+                    }
+                    failureCount++
+                    onProgress(
+                        BatchSendProgress(
+                            currentIndex = index + 1,
+                            total = toSend.size,
+                            itemId = item.id,
+                            status = SessionItemStatus.FAILED,
+                            message = "Queued (PACS not configured)",
+                        ),
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "encode for queue failed", e)
+                    staging.wipe(dicomFile)
+                    working = working.update(item.id) {
+                        it.copy(
+                            status = SessionItemStatus.FAILED,
+                            dicomFile = null,
+                            error = e.message ?: e.javaClass.simpleName,
+                        )
+                    }
+                    failureCount++
+                }
+            }
+            val message =
+                "PACS not configured — queued $failureCount of ${toSend.size} for later store. Study ${session.studyInstanceUid}"
+            return BatchSendResult(working, successCount, failureCount, message)
+        }
+
+        val batch = BatchStore(
+            clientFactory = { PacsClient(settings.toNode()) },
+            maxAttempts = 3,
+            initialBackoffMs = 400,
         )
 
         toSend.forEachIndexed { index, item ->
@@ -145,7 +211,6 @@ class SessionBatchSender(
                             patientName = encodeContext.patientName,
                             error = storeResult.message,
                         )
-                        // raw may have been moved into pending; mark tray item failed without local dicom
                         working = working.update(item.id) {
                             it.copy(
                                 status = SessionItemStatus.FAILED,

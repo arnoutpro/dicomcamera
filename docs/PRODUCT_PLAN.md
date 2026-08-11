@@ -169,6 +169,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Runnable Android skeleton, local PACS lab, standards decisions locked.
 
+**Status:** Implemented on branch `cursor/phase-0-foundations-cbc8` — Hello-PACS unit spike green; Orthanc lab compose file; ADR + compliance stubs.
+
 - Repo layout, CI, signing, Build flavors (dev/staging)
 - Spin up Orthanc (C-STORE/C-FIND) + MWL test SCP
 - Spike: C-ECHO + encapsulate one JPEG as DICOM SC + C-STORE

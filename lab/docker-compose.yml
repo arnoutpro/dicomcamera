@@ -1,0 +1,15 @@
+services:
+  orthanc:
+    image: jodogne/orthanc-plugins:1.12.4
+    container_name: dicomcamera-orthanc
+    ports:
+      - "4242:4242"   # DICOM DIMSE
+      - "8042:8042"   # HTTP UI / REST
+    volumes:
+      - ./orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ./orthanc-storage:/var/lib/orthanc/db
+    restart: unless-stopped
+
+  # Lightweight MWL SCP for Phase 2 prep (dcm4chee-arc optional later).
+  # For Phase 0, C-ECHO/C-STORE against Orthanc is enough.
+  # Uncomment when ready to exercise MWL locally with a dedicated tool.

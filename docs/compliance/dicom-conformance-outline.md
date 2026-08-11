@@ -7,7 +7,7 @@ Formal statement will be published before external pilots. This outline tracks S
 | Item | Value |
 |---|---|
 | Application | DICOM Camera (Android) |
-| Version | 0.1.x (Phase 0) |
+| Version | 0.3.x (Phase 2) |
 | AE Title | Configurable (default `DICOMCAM`) |
 
 ## Networking

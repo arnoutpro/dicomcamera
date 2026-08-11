@@ -1,6 +1,9 @@
 package nl.dicomcamera.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,6 +89,7 @@ fun SessionWorkflow(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pendingCapture by remember { mutableStateOf<SystemCameraCapture.Pending?>(null) }
+    var pendingPermissionPhoto by remember { mutableStateOf<Boolean?>(null) }
     var markupItem by remember { mutableStateOf<SessionItem?>(null) }
     var sendProgress by remember { mutableStateOf("Archiving…") }
     var sendFraction by remember { mutableFloatStateOf(0f) }
@@ -155,7 +160,7 @@ fun SessionWorkflow(
         ingestCapture(pending)
     }
 
-    fun startSystemCamera(photo: Boolean) {
+    fun launchSystemCameraNow(photo: Boolean) {
         if (!SystemCameraCapture.hasCameraApp(context, photo)) {
             onStatus(
                 if (photo) {
@@ -191,6 +196,33 @@ fun SessionWorkflow(
             onStatus("Camera launch failed: ${e.message}")
             diagnosticLog.log("camera_launch_fail", e.message.orEmpty())
         }
+    }
+
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val photo = pendingPermissionPhoto
+        pendingPermissionPhoto = null
+        if (!granted || photo == null) {
+            onStatus("Camera permission is required to capture")
+            diagnosticLog.log("camera_permission_denied", "CAMERA")
+            return@rememberLauncherForActivityResult
+        }
+        launchSystemCameraNow(photo)
+    }
+
+    fun startSystemCamera(photo: Boolean) {
+        // ColorOS (Oppo) rejects IMAGE_CAPTURE if our app's CAMERA permission is revoked.
+        val granted =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            launchSystemCameraNow(photo)
+            return
+        }
+        pendingPermissionPhoto = photo
+        diagnosticLog.log("camera_permission_request", if (photo) "photo" else "video")
+        cameraPermission.launch(Manifest.permission.CAMERA)
     }
 
 

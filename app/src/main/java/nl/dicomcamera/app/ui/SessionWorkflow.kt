@@ -84,6 +84,7 @@ fun SessionWorkflow(
     onCancelWorkflow: () -> Unit,
     onOpenLog: () -> Unit,
     onArchivedRefresh: () -> Unit,
+    onViewPending: () -> Unit = {},
     onStatus: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -338,6 +339,7 @@ fun SessionWorkflow(
                                 studyUid = session.studyInstanceUid,
                                 detail = outcome.message,
                             )
+                            onArchivedRefresh()
                         }
                         onStepChange(SessionStep.Result)
                     }
@@ -381,9 +383,16 @@ fun SessionWorkflow(
             ArchiveResultScreen(
                 success = resultSuccess,
                 message = resultMessage,
-                onDone = onFinished,
+                onDone = {
+                    onArchivedRefresh()
+                    onFinished()
+                },
                 onSeeLog = onOpenLog,
                 onRetryReview = { onStepChange(SessionStep.Review) },
+                onViewPending = {
+                    onArchivedRefresh()
+                    onViewPending()
+                },
             )
         }
     }

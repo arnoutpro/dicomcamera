@@ -222,6 +222,36 @@ fun ReviewSessionScreen(
 ) {
     var previewItem by remember { mutableStateOf<SessionItem?>(null) }
 
+    // Full-screen preview uses the whole viewport (scroll layout was clipping/pixelating).
+    previewItem?.let { item ->
+        Box(modifier = Modifier.fillMaxSize().background(DicomColors.Ink)) {
+            ReviewFullPreview(
+                item = item,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(DicomColors.Ink.copy(alpha = 0.72f))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    item.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = DicomColors.White,
+                )
+                QuietOutlinedButton(
+                    text = "Close preview",
+                    onClick = { previewItem = null },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -262,18 +292,6 @@ fun ReviewSessionScreen(
                         onMarkup = { onMarkupItem(item) },
                     )
                 }
-            }
-        }
-
-        previewItem?.let { item ->
-            SoftPanel {
-                SectionLabel("Preview")
-                ReviewFullPreview(item = item)
-                QuietOutlinedButton(
-                    text = "Close preview",
-                    onClick = { previewItem = null },
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
         }
 
@@ -376,9 +394,9 @@ private fun Modifier.clipBackground(): Modifier =
 private fun loadThumbBitmap(item: SessionItem): Bitmap? =
     loadBitmapForDisplay(item, maxEdge = 320)
 
-/** Review / mark-up display decode (~1600px) — avoids stretching a 256px thumb. */
+/** Review / mark-up display — keep near full resolution for sharp fullscreen preview. */
 private fun loadPreviewBitmap(item: SessionItem): Bitmap? =
-    loadBitmapForDisplay(item, maxEdge = 1600)
+    loadBitmapForDisplay(item, maxEdge = 4096)
 
 private fun loadBitmapForDisplay(item: SessionItem, maxEdge: Int): Bitmap? {
     if (!item.rawFile.exists() || item.rawFile.length() == 0L) return null
@@ -388,7 +406,12 @@ private fun loadBitmapForDisplay(item: SessionItem, maxEdge: Int): Bitmap? {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(item.rawFile.absolutePath, bounds)
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-                val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / maxEdge)
+                var sample = 1
+                var w = bounds.outWidth
+                var h = bounds.outHeight
+                while (w / sample > maxEdge || h / sample > maxEdge) {
+                    sample *= 2
+                }
                 val opts = BitmapFactory.Options().apply {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -436,7 +459,10 @@ private fun loadVideoFrame(file: File, maxEdge: Int): Bitmap? {
 }
 
 @Composable
-private fun ReviewFullPreview(item: SessionItem) {
+private fun ReviewFullPreview(
+    item: SessionItem,
+    modifier: Modifier = Modifier,
+) {
     when (item.kind) {
         CaptureKind.PHOTO -> {
             val bmp = remember(item.id, item.rawFile.path) { loadPreviewBitmap(item) }
@@ -444,61 +470,69 @@ private fun ReviewFullPreview(item: SessionItem) {
                 Image(
                     bitmap = bmp.asImageBitmap(),
                     contentDescription = item.label,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 280.dp, max = 480.dp),
+                    modifier = modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,
                     filterQuality = FilterQuality.High,
                 )
             } else {
-                Text("Preview unavailable", color = DicomColors.Slate500)
+                Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Preview unavailable", color = DicomColors.Slate500)
+                }
             }
         }
         CaptureKind.VIDEO -> {
             if (!item.rawFile.exists()) {
-                Text("Video file missing", color = DicomColors.Slate500)
+                Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Video file missing", color = DicomColors.Slate500)
+                }
                 return
             }
             var playError by remember(item.id) { mutableStateOf<String?>(null) }
             val thumb = remember(item.id, item.rawFile.path) { loadPreviewBitmap(item) }
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        setVideoPath(item.rawFile.absolutePath)
-                        setOnPreparedListener { mp ->
-                            mp.isLooping = true
-                            start()
+            Box(modifier = modifier.fillMaxSize()) {
+                AndroidView(
+                    factory = { ctx ->
+                        VideoView(ctx).apply {
+                            setVideoPath(item.rawFile.absolutePath)
+                            setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                // Fill the view while keeping aspect via CENTER_CROP-like layout.
+                                start()
+                            }
+                            setOnErrorListener { _, what, extra ->
+                                playError = "Video play error ($what/$extra)"
+                                true
+                            }
                         }
-                        setOnErrorListener { _, what, extra ->
-                            playError = "Video play error ($what/$extra)"
-                            true
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    update = { view ->
+                        if (view.tag != item.rawFile.absolutePath) {
+                            view.tag = item.rawFile.absolutePath
+                            view.setVideoPath(item.rawFile.absolutePath)
+                            view.start()
                         }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(320.dp)
-                    .background(DicomColors.Ink),
-                update = { view ->
-                    if (view.tag != item.rawFile.absolutePath) {
-                        view.tag = item.rawFile.absolutePath
-                        view.setVideoPath(item.rawFile.absolutePath)
-                        view.start()
-                    }
-                },
-            )
-            if (playError != null) {
-                Text(playError!!, color = DicomColors.Rose, style = MaterialTheme.typography.bodySmall)
-                if (thumb != null) {
-                    Image(
-                        bitmap = thumb.asImageBitmap(),
-                        contentDescription = item.label,
+                    },
+                )
+                if (playError != null) {
+                    Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp),
-                        contentScale = ContentScale.Fit,
-                        filterQuality = FilterQuality.High,
-                    )
+                            .align(Alignment.Center)
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(playError!!, color = DicomColors.Rose, style = MaterialTheme.typography.bodySmall)
+                        if (thumb != null) {
+                            Image(
+                                bitmap = thumb.asImageBitmap(),
+                                contentDescription = item.label,
+                                modifier = Modifier.fillMaxWidth(),
+                                contentScale = ContentScale.Fit,
+                                filterQuality = FilterQuality.High,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -703,6 +737,7 @@ fun ArchiveResultScreen(
     onDone: () -> Unit,
     onSeeLog: () -> Unit,
     onRetryReview: () -> Unit,
+    onViewPending: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -712,14 +747,14 @@ fun ArchiveResultScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         StatusBanner(
-            text = if (success) "Success" else "Archiving failed",
-            tone = if (success) StatusTone.Success else StatusTone.Error,
+            text = if (success) "Success" else "Queued for PACS",
+            tone = if (success) StatusTone.Success else StatusTone.Warn,
         )
         SoftPanel {
             Text(message, style = MaterialTheme.typography.bodyLarge)
             if (!success) {
                 Text(
-                    "Contact your PACS administrator if the problem continues.",
+                    "Patient instances stay in the pending queue for up to 4 hours. Resend manually when PACS is ready — nothing is sent automatically.",
                     style = MaterialTheme.typography.bodySmall,
                     color = DicomColors.Slate700,
                 )
@@ -733,6 +768,11 @@ fun ArchiveResultScreen(
         }
         if (!success) {
             ForestButton(
+                text = "View pending queue",
+                onClick = onViewPending,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            QuietOutlinedButton(
                 text = "See Log",
                 onClick = onSeeLog,
                 modifier = Modifier.fillMaxWidth(),

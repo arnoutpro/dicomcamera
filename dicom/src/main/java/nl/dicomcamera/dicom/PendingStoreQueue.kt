@@ -2,10 +2,12 @@ package nl.dicomcamera.dicom
 
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
- * Ephemeral failure queue: keeps DICOM (and optional raw JPEG) only until retry succeeds or user discards.
- * Never writes to the system gallery.
+ * Ephemeral failure queue: keeps DICOM (and optional raw) until manual retry succeeds,
+ * user discards, or the 4-hour TTL expires. Never writes to the system gallery.
+ * Retries are always user-initiated — never automatic.
  */
 class PendingStoreQueue(
     private val rootDir: File,
@@ -22,9 +24,24 @@ class PendingStoreQueue(
         val rawFile: File?,
         val patientId: String,
         val patientName: String,
+        val studyInstanceUid: String,
         val lastError: String,
         val createdAtEpochMs: Long,
-    )
+    ) {
+        val ageMs: Long get() = (System.currentTimeMillis() - createdAtEpochMs).coerceAtLeast(0L)
+        val remainingMs: Long get() = (TTL_MS - ageMs).coerceAtLeast(0L)
+    }
+
+    data class PatientGroup(
+        val patientId: String,
+        val patientName: String,
+        val studyInstanceUid: String,
+        val items: List<PendingItem>,
+        val latestError: String,
+        val createdAtEpochMs: Long,
+    ) {
+        val instanceCount: Int get() = items.size
+    }
 
     fun enqueue(
         dicomFile: File,
@@ -32,6 +49,7 @@ class PendingStoreQueue(
         patientId: String,
         patientName: String,
         error: String,
+        studyInstanceUid: String = "",
     ): PendingItem {
         val id = UUID.randomUUID().toString()
         val dir = File(rootDir, id).also { check(it.mkdirs()) { "Cannot create pending dir" } }
@@ -40,18 +58,26 @@ class PendingStoreQueue(
         staging.wipe(dicomFile)
 
         val destRaw = rawFile?.let { raw ->
-            val out = File(dir, "raw.jpg")
+            val outName = when {
+                raw.name.endsWith(".mp4", ignoreCase = true) -> "raw.mp4"
+                raw.name.endsWith(".jpg", ignoreCase = true) -> "raw.jpg"
+                raw.name.endsWith(".jpeg", ignoreCase = true) -> "raw.jpg"
+                else -> "raw.bin"
+            }
+            val out = File(dir, outName)
             raw.copyTo(out, overwrite = true)
             staging.wipe(raw)
             out
         }
 
+        val createdAt = System.currentTimeMillis()
         File(dir, "meta.txt").writeText(
             buildString {
                 appendLine("patientId=$patientId")
                 appendLine("patientName=$patientName")
+                appendLine("studyInstanceUid=$studyInstanceUid")
                 appendLine("error=$error")
-                appendLine("createdAt=${System.currentTimeMillis()}")
+                appendLine("createdAt=$createdAt")
             },
         )
 
@@ -62,17 +88,40 @@ class PendingStoreQueue(
             rawFile = destRaw,
             patientId = patientId,
             patientName = patientName,
+            studyInstanceUid = studyInstanceUid,
             lastError = error,
-            createdAtEpochMs = System.currentTimeMillis(),
+            createdAtEpochMs = createdAt,
         )
     }
 
     fun list(): List<PendingItem> {
+        purgeExpired()
         return rootDir.listFiles()
             ?.filter { it.isDirectory }
             ?.mapNotNull { dir -> readItem(dir) }
             ?.sortedByDescending { it.createdAtEpochMs }
             .orEmpty()
+    }
+
+    /** Group pending instances by patient (and study when present) for Archive / Pending UI. */
+    fun listGroupedByPatient(): List<PatientGroup> {
+        return list()
+            .groupBy { item ->
+                listOf(item.patientId, item.studyInstanceUid).joinToString("|")
+            }
+            .values
+            .map { items ->
+                val newest = items.maxBy { it.createdAtEpochMs }
+                PatientGroup(
+                    patientId = newest.patientId,
+                    patientName = newest.patientName,
+                    studyInstanceUid = newest.studyInstanceUid,
+                    items = items.sortedByDescending { it.createdAtEpochMs },
+                    latestError = newest.lastError,
+                    createdAtEpochMs = newest.createdAtEpochMs,
+                )
+            }
+            .sortedByDescending { it.createdAtEpochMs }
     }
 
     fun discard(id: String): Boolean {
@@ -89,12 +138,40 @@ class PendingStoreQueue(
         discard(id)
     }
 
+    fun discardPatient(patientId: String, studyInstanceUid: String = ""): Int {
+        return list()
+            .filter {
+                it.patientId == patientId &&
+                    (studyInstanceUid.isBlank() || it.studyInstanceUid == studyInstanceUid)
+            }
+            .count { discard(it.id) }
+    }
+
+    /** Drop entries older than [TTL_MS]. Returns number of discarded directories. */
+    fun purgeExpired(nowEpochMs: Long = System.currentTimeMillis()): Int {
+        val cutoff = nowEpochMs - TTL_MS
+        var removed = 0
+        rootDir.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
+            val item = readItem(dir) ?: run {
+                dir.deleteRecursively()
+                removed++
+                return@forEach
+            }
+            if (item.createdAtEpochMs < cutoff) {
+                if (discard(item.id)) removed++
+            }
+        }
+        return removed
+    }
+
     private fun readItem(dir: File): PendingItem? {
         val dicom = File(dir, "instance.dcm")
         if (!dicom.exists()) return null
         val meta = File(dir, "meta.txt").takeIf { it.exists() }?.readLines().orEmpty()
         fun value(key: String) = meta.firstOrNull { it.startsWith("$key=") }?.substringAfter("=").orEmpty()
-        val raw = File(dir, "raw.jpg").takeIf { it.exists() }
+        val raw = listOf("raw.jpg", "raw.mp4", "raw.bin")
+            .map { File(dir, it) }
+            .firstOrNull { it.exists() }
         return PendingItem(
             id = dir.name,
             directory = dir,
@@ -102,8 +179,13 @@ class PendingStoreQueue(
             rawFile = raw,
             patientId = value("patientId").ifBlank { "?" },
             patientName = value("patientName").ifBlank { "?" },
+            studyInstanceUid = value("studyInstanceUid"),
             lastError = value("error").ifBlank { "unknown" },
             createdAtEpochMs = value("createdAt").toLongOrNull() ?: dir.lastModified(),
         )
+    }
+
+    companion object {
+        val TTL_MS: Long = TimeUnit.HOURS.toMillis(4)
     }
 }

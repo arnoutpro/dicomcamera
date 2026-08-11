@@ -94,6 +94,7 @@ class SessionBatchSender(
                         patientId = encodeContext.patientId,
                         patientName = encodeContext.patientName,
                         error = err,
+                        studyInstanceUid = session.studyInstanceUid,
                     )
                     audit.record(
                         action = "c_store_queued_unconfigured",
@@ -210,6 +211,7 @@ class SessionBatchSender(
                             patientId = encodeContext.patientId,
                             patientName = encodeContext.patientName,
                             error = storeResult.message,
+                            studyInstanceUid = session.studyInstanceUid,
                         )
                         working = working.update(item.id) {
                             it.copy(
@@ -239,6 +241,7 @@ class SessionBatchSender(
                         patientId = encodeContext.patientId,
                         patientName = encodeContext.patientName,
                         error = e.message ?: e.javaClass.simpleName,
+                        studyInstanceUid = session.studyInstanceUid,
                     )
                 } else {
                     staging.wipe(dicomFile)

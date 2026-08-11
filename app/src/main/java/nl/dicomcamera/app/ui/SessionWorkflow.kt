@@ -201,7 +201,6 @@ fun SessionWorkflow(
             "camera_launch",
             buildString {
                 append(if (photo) "photo" else "video")
-                append(" extraOutput=").append(pending.useExtraOutput)
                 append(" uri=").append(pending.outputUri)
             },
         )
@@ -215,49 +214,31 @@ fun SessionWorkflow(
         }
     }
 
-    fun capturePermissions(): Array<String> {
-        val perms = mutableListOf(Manifest.permission.CAMERA)
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            perms += Manifest.permission.READ_MEDIA_IMAGES
-            perms += Manifest.permission.READ_MEDIA_VIDEO
-        } else {
-            perms += Manifest.permission.READ_EXTERNAL_STORAGE
-        }
-        return perms.toTypedArray()
-    }
-
-    fun hasAllCapturePermissions(): Boolean =
-        capturePermissions().all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-
     val cameraPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
         val photo = pendingPermissionPhoto
         pendingPermissionPhoto = null
-        val cameraOk = grants[Manifest.permission.CAMERA] == true
-        if (!cameraOk || photo == null) {
+        if (!granted || photo == null) {
             onStatus("Camera permission is required to capture")
-            diagnosticLog.log("camera_permission_denied", grants.toString())
+            diagnosticLog.log("camera_permission_denied", "CAMERA")
             return@rememberLauncherForActivityResult
         }
-        // Media read is optional (gallery fallback) — proceed even if denied.
         launchSystemCameraNow(photo)
     }
 
     fun startSystemCamera(photo: Boolean) {
-        // ColorOS needs CAMERA; READ_MEDIA helps recover full-res from DCIM if EXTRA_OUTPUT is ignored.
-        val cameraGranted =
+        // Only CAMERA — no Photos/Videos library access.
+        val granted =
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
-        if (cameraGranted && hasAllCapturePermissions()) {
+        if (granted) {
             launchSystemCameraNow(photo)
             return
         }
         pendingPermissionPhoto = photo
         diagnosticLog.log("camera_permission_request", if (photo) "photo" else "video")
-        cameraPermission.launch(capturePermissions())
+        cameraPermission.launch(Manifest.permission.CAMERA)
     }
 
 

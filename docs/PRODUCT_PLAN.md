@@ -225,6 +225,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Photos and videos in one exam session; reliable send; still no durable local archive.
 
+**Status:** Implemented on branch `cursor/phase-3-video-session-cbc8`.
+
 - Video capture via CameraX; encode to agreed DICOM video SOP (or multi-frame policy documented)
 - Multi-shot session tray (in-memory / encrypted staging only)
 - Batch store with per-instance status; wipe each instance on ACK

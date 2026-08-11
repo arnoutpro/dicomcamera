@@ -121,6 +121,12 @@ class InProcessDicomScp(
             UID.ImplicitVRLittleEndian,
         )
         tc(
+            UID.VideoPhotographicImageStorage,
+            UID.MPEG4HP41,
+            UID.ExplicitVRLittleEndian,
+            UID.ImplicitVRLittleEndian,
+        )
+        tc(
             UID.ModalityWorklistInformationModelFind,
             UID.ExplicitVRLittleEndian,
             UID.ImplicitVRLittleEndian,

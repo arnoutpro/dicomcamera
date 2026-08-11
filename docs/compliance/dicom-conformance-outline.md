@@ -7,7 +7,7 @@ Formal statement will be published before external pilots. This outline tracks S
 | Item | Value |
 |---|---|
 | Application | DICOM Camera (Android) |
-| Version | 0.3.x (Phase 2) |
+| Version | 0.4.x (Phase 3) |
 | AE Title | Configurable (default `DICOMCAM`) |
 
 ## Networking
@@ -19,14 +19,15 @@ Formal statement will be published before external pilots. This outline tracks S
 | VL Photographic Image Storage | SCU (Storage) | 1 (preferred encoding) |
 | Basic Worklist Management (C-FIND) | SCU | 2 |
 | Study Root Query/Retrieve Information Model – FIND | SCU | 2 |
-| Encapsulated video / multi-frame (TBD) | SCU | 3 |
+| Video Photographic Image Storage | SCU (Storage) | 3 |
 | DICOMweb QIDO-RS / STOW-RS | SCU | 4 |
 
-## Transfer syntaxes (Phase 0)
+## Transfer syntaxes
 
 - Explicit VR Little Endian
 - Implicit VR Little Endian
-- JPEG Baseline (Process 1) for encapsulated Secondary Capture
+- JPEG Baseline (Process 1) for VL Photographic
+- MPEG-4 AVC/H.264 High Profile / Level 4.1 (`MPEG4HP41`) for Video Photographic
 
 ## UID generation
 

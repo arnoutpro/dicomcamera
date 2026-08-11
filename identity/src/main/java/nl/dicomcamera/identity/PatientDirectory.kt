@@ -1,10 +1,12 @@
 package nl.dicomcamera.identity
 
+import nl.dicomcamera.dicom.DicomNode
+import nl.dicomcamera.dicom.FindResult
+import nl.dicomcamera.dicom.PacsClient
+import nl.dicomcamera.dicom.WorklistQuery
+
 /**
  * Pluggable patient demographics directory.
- *
- * Phase 0: [ManualPatientDirectory] only.
- * Later: MWL, HL7 v2 façade, FHIR Patient search — same interface.
  */
 interface PatientDirectory {
     val source: IdentitySource
@@ -36,13 +38,42 @@ class ManualPatientDirectory : PatientDirectory {
 }
 
 /**
- * Placeholder — implemented in Phase 2 (DICOM MWL C-FIND).
+ * Phase 2: DICOM Modality Worklist C-FIND backed order directory.
  */
-class ModalityWorklistDirectory : OrderDirectory {
+class ModalityWorklistDirectory(
+    private val nodeProvider: () -> DicomNode,
+) : OrderDirectory {
     override val source: IdentitySource = IdentitySource.MODALITY_WORKLIST
 
     override suspend fun findOrders(query: PatientQuery): List<OrderExamRef> {
-        throw NotImplementedError("MWL C-FIND lands in Phase 2")
+        val result = PacsClient(nodeProvider()).use { client ->
+            client.findWorklist(
+                WorklistQuery(
+                    patientId = query.patientId,
+                    patientName = query.patientName,
+                    accessionNumber = query.accessionNumber,
+                    modality = "XC",
+                ),
+            )
+        }
+        return when (result) {
+            is FindResult.Failed -> throw IllegalStateException(result.message, result.cause)
+            is FindResult.Success -> result.items.map { entry ->
+                OrderExamRef(
+                    accessionNumber = entry.accessionNumber,
+                    studyInstanceUid = entry.studyInstanceUid,
+                    requestedProcedureId = entry.requestedProcedureId,
+                    studyDescription = entry.studyDescription,
+                    patient = PatientDemographics(
+                        patientId = entry.patientId,
+                        patientName = entry.patientName,
+                        birthDate = entry.patientBirthDate,
+                        sex = entry.patientSex,
+                        source = IdentitySource.MODALITY_WORKLIST,
+                    ),
+                )
+            }
+        }
     }
 }
 

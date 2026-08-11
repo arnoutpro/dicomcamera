@@ -208,6 +208,8 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Real clinical identity binding and “add more photos to this exam.”
 
+**Status:** Implemented on branch `cursor/phase-2-worklist-cbc8`.
+
 - MWL C-FIND SCU (filters: date, modality, station AE, Patient ID, Accession)
 - Worklist picker → populate all study/order tags; create Series per capture session
 - Study-level C-FIND (QR) by Patient ID / Accession / Study Instance UID

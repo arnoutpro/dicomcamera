@@ -5,9 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.media.MediaMetadataRetriever
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -52,7 +49,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import nl.dicomcamera.app.session.BodyParts
 import nl.dicomcamera.app.session.CaptureKind
 import nl.dicomcamera.app.session.CaptureSession
@@ -684,23 +680,6 @@ fun WorkflowChoiceRow(
             }
         }
     }
-}
-
-/**
- * Helper to create a FileProvider URI for system camera capture into [staging].
- */
-fun createCaptureUri(
-    context: android.content.Context,
-    staging: SecureStaging,
-    photo: Boolean,
-): Pair<File, Uri> {
-    val file = staging.createStagingFile(if (photo) "cam" else "vid", if (photo) "jpg" else "mp4")
-    val uri = FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        file,
-    )
-    return file to uri
 }
 
 fun readCaptureMeta(file: File, kind: CaptureKind): Triple<Int, Int, Int> {

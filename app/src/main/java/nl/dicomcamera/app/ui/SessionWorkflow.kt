@@ -1,16 +1,12 @@
 package nl.dicomcamera.app.ui
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nl.dicomcamera.app.capture.SystemCameraCapture
+import nl.dicomcamera.app.capture.SystemCameraContract
 import nl.dicomcamera.app.demo.ArchivedPatientStore
 import nl.dicomcamera.app.demo.LocalArchiveStore
 import nl.dicomcamera.app.diagnostics.DiagnosticLog
@@ -47,10 +45,7 @@ import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
 import nl.dicomcamera.app.ui.theme.DicomColors
 import nl.dicomcamera.dicom.AuditLog
-import nl.dicomcamera.dicom.DicomUid
-import nl.dicomcamera.dicom.PatientStudyContext
 import nl.dicomcamera.dicom.SecureStaging
-import java.io.File
 
 enum class SessionStep {
     Setup,
@@ -85,10 +80,11 @@ fun SessionWorkflow(
     onCancelWorkflow: () -> Unit,
     onOpenLog: () -> Unit,
     onArchivedRefresh: () -> Unit,
+    onStatus: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var pendingCapture by remember { mutableStateOf<Pair<File, CaptureKind>?>(null) }
+    var pendingCapture by remember { mutableStateOf<SystemCameraCapture.Pending?>(null) }
     var markupItem by remember { mutableStateOf<SessionItem?>(null) }
     var sendProgress by remember { mutableStateOf("Archiving…") }
     var sendFraction by remember { mutableFloatStateOf(0f) }
@@ -112,20 +108,14 @@ fun SessionWorkflow(
         )
     }
 
-    val takePicture = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicture(),
-    ) { ok ->
-        val pending = pendingCapture
-        pendingCapture = null
-        if (!ok || pending == null) {
-            pending?.first?.let { staging.wipe(it) }
-            if (session.items.isNotEmpty()) onStepChange(SessionStep.Review)
-            return@rememberLauncherForActivityResult
-        }
-        val (file, kind) = pending
+    fun ingestCapture(pending: SystemCameraCapture.Pending) {
+        val kind = if (pending.photo) CaptureKind.PHOTO else CaptureKind.VIDEO
+        val file = pending.stagingFile
         if (!file.exists() || file.length() == 0L) {
-            staging.wipe(file)
-            return@rememberLauncherForActivityResult
+            SystemCameraCapture.abandon(context, pending)
+            onStatus(if (pending.photo) "Camera returned an empty photo" else "Camera returned an empty video")
+            diagnosticLog.log("camera_empty", if (pending.photo) "photo" else "video")
+            return
         }
         val (rows, cols, frames) = readCaptureMeta(file, kind)
         onSessionChange(
@@ -136,6 +126,7 @@ fun SessionWorkflow(
                     rows = rows,
                     columns = cols,
                     frameCount = frames,
+                    framesPerSecond = if (kind == CaptureKind.VIDEO) 30 else 1,
                 ),
             ),
         )
@@ -143,37 +134,65 @@ fun SessionWorkflow(
         onStepChange(SessionStep.Review)
     }
 
-    val captureVideo = rememberLauncherForActivityResult(
-        ActivityResultContracts.CaptureVideo(),
-    ) { ok ->
+    val systemCamera = rememberLauncherForActivityResult(SystemCameraContract()) { result ->
         val pending = pendingCapture
         pendingCapture = null
-        if (!ok || pending == null) {
-            pending?.first?.let { staging.wipe(it) }
+        if (pending == null) return@rememberLauncherForActivityResult
+        if (!result.ok) {
+            SystemCameraCapture.abandon(context, pending)
             if (session.items.isNotEmpty()) onStepChange(SessionStep.Review)
+            else onStatus(if (pending.photo) "Photo capture cancelled" else "Video capture cancelled")
+            diagnosticLog.log("camera_cancelled", if (pending.photo) "photo" else "video")
             return@rememberLauncherForActivityResult
         }
-        val (file, kind) = pending
-        if (!file.exists() || file.length() == 0L) {
-            staging.wipe(file)
+        val ok = SystemCameraCapture.finalizeCapture(context, pending, result.data)
+        if (!ok) {
+            SystemCameraCapture.abandon(context, pending)
+            onStatus("Camera did not return an image — try again")
+            diagnosticLog.log("camera_finalize_fail", if (pending.photo) "photo" else "video")
             return@rememberLauncherForActivityResult
         }
-        val (rows, cols, frames) = readCaptureMeta(file, kind)
-        onSessionChange(
-            session.add(
-                SessionItem(
-                    kind = kind,
-                    rawFile = file,
-                    rows = rows,
-                    columns = cols,
-                    frameCount = frames,
-                    framesPerSecond = 30,
-                ),
-            ),
-        )
-        diagnosticLog.log("capture", "${kind.name} ${file.name}")
-        onStepChange(SessionStep.Review)
+        ingestCapture(pending)
     }
+
+    fun startSystemCamera(photo: Boolean) {
+        if (!SystemCameraCapture.hasCameraApp(context, photo)) {
+            onStatus(
+                if (photo) {
+                    "No system camera app found for photos"
+                } else {
+                    "No system camera app found for video"
+                },
+            )
+            diagnosticLog.log("camera_missing", if (photo) "photo" else "video")
+            return
+        }
+        val pending = try {
+            SystemCameraCapture.prepare(context, staging, photo)
+        } catch (e: Exception) {
+            onStatus("Camera prepare failed: ${e.message}")
+            diagnosticLog.log("camera_prepare_fail", e.message.orEmpty())
+            return
+        }
+        pendingCapture = pending
+        diagnosticLog.log(
+            "camera_launch",
+            buildString {
+                append(if (photo) "photo" else "video")
+                append(" extraOutput=").append(pending.useExtraOutput)
+                append(" uri=").append(pending.outputUri)
+            },
+        )
+        try {
+            systemCamera.launch(pending)
+        } catch (e: Exception) {
+            pendingCapture = null
+            SystemCameraCapture.abandon(context, pending)
+            onStatus("Camera launch failed: ${e.message}")
+            diagnosticLog.log("camera_launch_fail", e.message.orEmpty())
+        }
+    }
+
 
     when (step) {
         SessionStep.Setup -> PatientSetupScreen(
@@ -185,16 +204,12 @@ fun SessionWorkflow(
             onCapturePhoto = {
                 val updated = syncExamFromPatient(patient)
                 if (updated != null) onExamChange(updated)
-                val (file, uri) = createCaptureUri(context, staging, true)
-                pendingCapture = file to CaptureKind.PHOTO
-                takePicture.launch(uri)
+                startSystemCamera(photo = true)
             },
             onCaptureVideo = {
                 val updated = syncExamFromPatient(patient)
                 if (updated != null) onExamChange(updated)
-                val (file, uri) = createCaptureUri(context, staging, false)
-                pendingCapture = file to CaptureKind.VIDEO
-                captureVideo.launch(uri)
+                startSystemCamera(photo = false)
             },
             onCancel = {
                 onSessionChange(batchSender.discardSession(session))
@@ -217,16 +232,8 @@ fun SessionWorkflow(
                     markupItem = item
                     onStepChange(SessionStep.Markup)
                 },
-                onCaptureMorePhoto = {
-                    val (file, uri) = createCaptureUri(context, staging, true)
-                    pendingCapture = file to CaptureKind.PHOTO
-                    takePicture.launch(uri)
-                },
-                onCaptureMoreVideo = {
-                    val (file, uri) = createCaptureUri(context, staging, false)
-                    pendingCapture = file to CaptureKind.VIDEO
-                    captureVideo.launch(uri)
-                },
+                onCaptureMorePhoto = { startSystemCamera(photo = true) },
+                onCaptureMoreVideo = { startSystemCamera(photo = false) },
                 onArchiveToPacs = {
                     val currentExam = syncExamFromPatient(patient)?.also(onExamChange) ?: exam
                     if (currentExam == null) return@ReviewSessionScreen

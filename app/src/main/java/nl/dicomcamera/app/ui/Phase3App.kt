@@ -728,6 +728,7 @@ if (pacsSettings.isConfigured()) {
                         selectMainTab(MainTab.Settings)
                     },
                     onArchivedRefresh = { refreshArchive() },
+                    onStatus = { statusNote = it },
                 )
 
 

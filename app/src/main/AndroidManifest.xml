@@ -16,6 +16,10 @@
         <intent>
             <action android:name="android.media.action.VIDEO_CAPTURE" />
         </intent>
+        <!-- ColorOS / OxygenOS camera packages (Oppo Find X9 Pro, etc.) -->
+        <package android:name="com.oplus.camera" />
+        <package android:name="com.oppo.camera" />
+        <package android:name="com.oneplus.camera" />
     </queries>
 
     <application

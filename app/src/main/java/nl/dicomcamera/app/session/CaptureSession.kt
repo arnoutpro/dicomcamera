@@ -29,9 +29,11 @@ data class SessionItem(
     val status: SessionItemStatus = SessionItemStatus.STAGED,
     val error: String? = null,
     val sopInstanceUid: String? = null,
+    /** Optional UI label, e.g. mark-up derived from another capture. */
+    val displayLabel: String? = null,
 ) {
     val label: String
-        get() = when (kind) {
+        get() = displayLabel ?: when (kind) {
             CaptureKind.PHOTO -> "Photo"
             CaptureKind.VIDEO -> "Video"
         }

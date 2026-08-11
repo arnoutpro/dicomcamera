@@ -380,23 +380,14 @@ fun Phase3App() {
                         val ctx = entry.toPatientStudyContext("Clinical photo/video session").copy(
                             bodyPartExamined = null,
                             laterality = null,
-                            patientBirthDate = null,
-                            patientSex = null,
-                            patientName = "",
                         )
                         startNewSession(ExamSelection(ctx, ExamSource.WORKLIST))
-                        worklistHint = listOfNotNull(
-                            entry.patientName.takeIf { it.isNotBlank() },
-                            entry.patientBirthDate,
-                            entry.patientSex,
-                            entry.accessionNumber?.let { "Acc $it" },
-                        ).joinToString(" · ")
-                        // Start with clear Name / Birthdate / Sex — user confirms on setup screen.
+                        worklistHint = null
                         patient = ManualPatientForm(
                             patientId = entry.patientId,
-                            patientName = "",
-                            birthDate = "",
-                            sex = "",
+                            patientName = entry.patientName,
+                            birthDate = entry.patientBirthDate.orEmpty(),
+                            sex = entry.patientSex.orEmpty(),
                             accessionNumber = entry.accessionNumber.orEmpty(),
                             studyDescription = entry.studyDescription.orEmpty(),
                             bodyPartExamined = "",
@@ -611,17 +602,12 @@ fun Phase3App() {
                         ArchivedPatientsPanel(
                             records = archivedRecords,
                             onAddImaging = { record ->
-                                worklistHint = listOfNotNull(
-                                    record.patientName,
-                                    record.birthDate,
-                                    record.sex,
-                                    record.accessionNumber?.let { "Acc $it" },
-                                ).joinToString(" · ")
+                                worklistHint = null
                                 patient = ManualPatientForm(
                                     patientId = record.patientId,
-                                    patientName = "",
-                                    birthDate = "",
-                                    sex = "",
+                                    patientName = record.patientName,
+                                    birthDate = record.birthDate.orEmpty(),
+                                    sex = record.sex.orEmpty(),
                                     accessionNumber = record.accessionNumber.orEmpty(),
                                     studyDescription = record.studyDescription.orEmpty(),
                                     bodyPartExamined = "",
@@ -646,27 +632,16 @@ if (pacsSettings.isConfigured()) {
                                 embedded = true,
                                 onSelected = { entry: StudyEntry ->
                                     val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
-                                        bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                                        laterality = patient.laterality.takeIf { it.isNotBlank() },
-                                    )
-                                    worklistHint = listOfNotNull(
-                                        entry.patientName.takeIf { it.isNotBlank() },
-                                        entry.patientBirthDate,
-                                        entry.patientSex,
-                                        entry.accessionNumber?.let { "Acc $it" },
-                                    ).joinToString(" · ")
-                                    startNewSession(ExamSelection(ctx.copy(
-                                        patientName = "",
-                                        patientBirthDate = null,
-                                        patientSex = null,
                                         bodyPartExamined = null,
                                         laterality = null,
-                                    ), ExamSource.APPEND_EXISTING))
+                                    )
+                                    worklistHint = null
+                                    startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
                                     patient = ManualPatientForm(
                                         patientId = entry.patientId,
-                                        patientName = "",
-                                        birthDate = "",
-                                        sex = "",
+                                        patientName = entry.patientName,
+                                        birthDate = entry.patientBirthDate.orEmpty(),
+                                        sex = entry.patientSex.orEmpty(),
                                         accessionNumber = entry.accessionNumber.orEmpty(),
                                         studyDescription = entry.studyDescription.orEmpty(),
                                     )

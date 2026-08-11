@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -86,16 +87,60 @@ fun SessionWorkflow(
     onArchivedRefresh: () -> Unit,
     onViewPending: () -> Unit = {},
     onStatus: (String) -> Unit = {},
+    /** Return true if the top-bar / system back was handled inside the session. */
+    onProvideBackHandler: ((() -> Boolean)?) -> Unit = {},
+    onPreviewOpenChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pendingCapture by remember { mutableStateOf<SystemCameraCapture.Pending?>(null) }
     var pendingPermissionPhoto by remember { mutableStateOf<Boolean?>(null) }
     var markupItem by remember { mutableStateOf<SessionItem?>(null) }
+    var previewItem by remember { mutableStateOf<SessionItem?>(null) }
     var sendProgress by remember { mutableStateOf("Archiving…") }
     var sendFraction by remember { mutableFloatStateOf(0f) }
     var resultSuccess by remember { mutableStateOf(false) }
     var resultMessage by remember { mutableStateOf("") }
+
+    LaunchedEffect(step) {
+        if (step != SessionStep.Review) previewItem = null
+    }
+
+    LaunchedEffect(previewItem) {
+        onPreviewOpenChange(previewItem != null)
+    }
+
+    DisposableEffect(onPreviewOpenChange) {
+        onDispose { onPreviewOpenChange(false) }
+    }
+
+    DisposableEffect(step, previewItem, markupItem) {
+        onProvideBackHandler {
+            when {
+                step == SessionStep.Review && previewItem != null -> {
+                    previewItem = null
+                    true
+                }
+                step == SessionStep.Markup -> {
+                    markupItem = null
+                    onStepChange(SessionStep.Review)
+                    true
+                }
+                step == SessionStep.Review -> {
+                    onStepChange(SessionStep.Setup)
+                    true
+                }
+                step == SessionStep.Result -> {
+                    onArchivedRefresh()
+                    onFinished()
+                    true
+                }
+                step == SessionStep.Archiving -> true // stay on progress
+                else -> false // Setup: Phase3App leaves the session
+            }
+        }
+        onDispose { onProvideBackHandler(null) }
+    }
 
     fun syncExamFromPatient(form: ManualPatientForm): ExamSelection? {
         val current = exam ?: return null
@@ -272,6 +317,8 @@ fun SessionWorkflow(
                 bodyPart = patient.bodyPartExamined,
                 session = session,
                 staging = staging,
+                previewItem = previewItem,
+                onPreviewItemChange = { previewItem = it },
                 onDeleteItem = { id ->
                     onSessionChange(batchSender.discardItem(session, id))
                 },

@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- SecureStaging root + camera subdirectory for system-camera EXTRA_OUTPUT -->
     <files-path name="staging" path="staging/" />
     <files-path name="capture" path="capture/" />
+    <cache-path name="cache" path="." />
+    <external-files-path name="ext_pictures" path="Pictures/" />
 </paths>

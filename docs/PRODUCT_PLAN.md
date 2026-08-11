@@ -34,7 +34,9 @@ Differentiators for MVP:
 - [ ] **No local storage after successful send to PACS**
 - [ ] **Query PACS and add additional photos/videos to a current order/exam**
 
-Out of MVP (explicitly later): iOS, annotation/markup suite, offline long-lived queues, deep proprietary EHR UI plugins, advanced image processing.
+Out of first clinical MVP build: iOS, annotation/markup suite, offline long-lived queues, deep proprietary EHR UI plugins, advanced image processing.
+
+**Future-ready (design now, implement in identity phases):** HL7 v2 and FHIR adapters so the app can resolve patient/order details from the EPD on the fly — without locking to one EHR vendor.
 
 ---
 
@@ -53,31 +55,49 @@ Out of MVP (explicitly later): iOS, annotation/markup suite, offline long-lived 
 
 Key identity tags to preserve when appending to an exam: Patient ID, Study Instance UID, Accession Number, Requested Procedure ID, Scheduled Procedure Step ID; generate new Series Instance UID + SOP Instance UIDs for new captures.
 
-### HL7 v2 vs FHIR — what we actually need
+### HL7 & FHIR — EHR identity on the fly (future-ready)
 
-**Imaging path = DICOM. Not FHIR.**  
-Pixels, study UIDs, worklist, and PACS store stay on DICOM (DIMSE and/or DICOMweb). That is the MVP integration surface and what makes us PACS-vendor independent.
+**Split of responsibilities**
 
-**HL7 v2** already feeds most hospital worklists: ADT/ORM (or equivalent) land in the RIS/broker, which exposes **Modality Worklist**. The app consumes MWL as a DICOM SCU. We do **not** implement HL7 v2 in the Android client for MVP.
-
-**FHIR is optional EHR “front door” only — not part of MVP.**  
-Some modern EPDs can launch or deep-link a context (`Patient`, `ServiceRequest`, `ImagingStudy`) via FHIR / SMART-on-FHIR. That can help open the right patient/order on the phone when MWL is awkward to expose to mobile devices. It does **not** replace C-STORE/STOW or MWL for sites that already have them.
-
-| Concern | MVP approach | Later (Phase 5+, only if a pilot needs it) |
+| Path | Standard | Job |
 |---|---|---|
-| Who is the patient / which order? | MWL + PACS C-FIND + barcode/Accession | Optional FHIR read / SMART launch |
-| Where do images go? | DICOM C-STORE / STOW-RS → PACS | Still DICOM (FHIR DocumentReference is not our primary archive path) |
-| Dutch EPD variety (HiX, Epic, etc.) | Stay standards-based; avoid vendor SDKs | Per-site FHIR profiles (e.g. Nictiz-oriented) only when required |
+| **Imaging** | DICOM (DIMSE / DICOMweb) | Worklist (when available), query existing exams, store photos/videos, append to study |
+| **Identity / demographics** | **HL7 v2** and **FHIR** | Look up patient (and optionally order) details from the EPD/EHR on the fly |
 
-Keep demographics source-of-truth at RIS/EPD; the app is a **modality**, not an MPI.
+Pixels never go through FHIR/HL7 as the archive API. Demographics should not be typed by hand when the EHR can answer.
+
+**Why both HL7 v2 and FHIR**
+
+- **HL7 v2** is still what most Dutch/EU hospitals run today (ADT, QBP/RSP or similar query patterns, ORM/ORU via the interface engine). Handy for *“scan/enter Patient ID → fetch name, DOB, sex, … now”* without waiting for a radiology worklist entry.
+- **FHIR** is the forward path (and increasingly what EPDs expose): `Patient`, `ServiceRequest`, `ImagingStudy`, SMART-on-FHIR launch/context. Same product capability, modern transport and authorization.
+- Keeping **both** behind one internal `PatientDirectory` / `OrderDirectory` interface = vendor independence + future-proofing. Site config picks the adapter(s).
+
+**How it reaches the phone (important)**
+
+Raw HL7 v2 MLLP from a mobile app is rarely acceptable to hospital IT. Preferred patterns:
+
+1. **FHIR over HTTPS** (direct to EPD FHIR gateway or API management) — preferred long-term
+2. **HL7 v2 via site interface engine** — engine speaks MLLP upstream; app calls a small HTTPS façade (hospital-hosted or our optional on-prem connector) that performs QBP/ADT-style lookup and returns demographics JSON
+3. **IHE PDQ / PDQm** where the site already has a PIX/PDQ actor
+
+The Android app always sees a clean “lookup by identifier → patient demographics (+ optional orders)” API; transports stay pluggable.
+
+| Concern | Near-term (Phases 1–2) | Next (Phase 5 identity) | Forward |
+|---|---|---|---|
+| Who is the patient? | Manual / MWL / barcode | **HL7 v2 query** and/or **FHIR Patient** search | SMART launch + PDQm |
+| Which order/exam? | MWL + PACS C-FIND | FHIR `ServiceRequest` / `ImagingStudy` where available | Same |
+| Where do images go? | DICOM C-STORE / STOW-RS → PACS | Still DICOM | Still DICOM |
+
+Keep demographics source-of-truth at the EPD; the app is a **modality + lookup client**, not an MPI.
 
 ### IHE (target actors)
 
 | Profile | Actor intent |
 |---|---|
 | Radiology **Scheduled Workflow (SWF)** | Acquisition Modality (MWL → acquire → store) |
-| **Consistent Presentation / patient ID** hygiene | Correct demographics from worklist, not free-text when avoidable |
+| **Consistent Presentation / patient ID** hygiene | Prefer EHR/MWL demographics over free-text |
 | Radiology **Web-based Image Capture (WIC)** | Optional path: mobile capturer → Image Manager via DICOMweb |
+| ITI **PDQ / PDQm** | Patient Demographics Query (v2 / FHIR) when site supports it |
 | ITI **ATNA** | Audit trail of query/store/auth events |
 | ITI **CT** (Consistent Time) | Device clock sync expectation (NTP via MDM) |
 
@@ -114,30 +134,32 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 ## Architecture (proposed)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Android app (Kotlin)                                   │
-│  UI → Capture → DICOM encoder → Network → Purge         │
-│         ↑              ↑                                │
-│    CameraX        DICOM toolkit                         │
-└─────────┬──────────────┬────────────────────────────────┘
-          │              │
-   DIMSE (C-ECHO/FIND/STORE)     DICOMweb (QIDO/STOW/WADO)
-          │              │
-          └──────┬───────┘
-                 ▼
-        Any standards-compliant PACS / VNA
-                 ▲
-        MWL SCP (often RIS or broker)
+┌──────────────────────────────────────────────────────────────────┐
+│  Android app (Kotlin)                                            │
+│  UI → Identity resolve → Capture → DICOM encode → Store → Purge│
+│         │                  │            │                        │
+│    PatientDirectory     CameraX    DICOM toolkit                 │
+│    (MWL | HL7 | FHIR)                                            │
+└─────────┬──────────────────┴────────────┬────────────────────────┘
+          │                               │
+   EHR identity lookups            PACS imaging
+   FHIR HTTPS / HL7 façade         DIMSE + DICOMweb
+          │                               │
+          ▼                               ▼
+   EPD / interface engine          Any standards-compliant PACS/VNA
+          │                               ▲
+          └──────── MWL SCP (RIS/broker) ─┘
 ```
 
 **Stack leanings (to validate in Phase 0):**
 
 - UI: Kotlin + Jetpack Compose + CameraX
 - DICOM: native DCMTK via NDK **or** pure-JVM dcm4che — pick one primary stack in Phase 0 spike
-- Local test harness: Orthanc and/or dcm4chee + sample MWL
+- Identity: internal interfaces first; stub manual + MWL; reserve HL7 v2 façade + FHIR R4 clients
+- Local test harness: Orthanc and/or dcm4chee + sample MWL; later HAPI FHIR + HL7 test façade
 - Config: encrypted SharedPreferences / DataStore; MDM managed configurations
 
-**Non-goals for architecture:** cloud intermediary that re-stores images (keeps PHI out of our servers unless a site explicitly deploys an optional broker).
+**Non-goals for architecture:** our cloud must not become the image archive. Optional **on-prem identity connector** (HL7 v2 MLLP ↔ HTTPS) is allowed when hospitals need it; images still go device → PACS.
 
 ---
 
@@ -155,8 +177,9 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 - Threat model + data-flow diagram (capture → encode → store → wipe)
 - Compliance checklist stub (DICOM conformance statement outline)
 - Draft **intended purpose** (MDR) + DPIA/GEB outline for NL pilots; flag open classification questions for counsel
+- Define `PatientDirectory` / `OrderDirectory` interfaces (manual, MWL, future HL7, future FHIR) so we do not paint ourselves into a DICOM-only identity corner
 
-**Exit criteria:** Hello-PACS demo on a device/emulator; written ADR for DICOM stack; DPIA outline + intended-purpose draft exists.
+**Exit criteria:** Hello-PACS demo on a device/emulator; written ADR for DICOM stack; DPIA outline + intended-purpose draft exists; identity interfaces sketched.
 
 ---
 
@@ -222,19 +245,27 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 ---
 
-### Phase 5 — EHR launch options + NL/EU compliance packaging
+### Phase 5 — EHR identity (HL7 + FHIR) + NL/EU compliance packaging
 
-**Goal:** Pilot-ready for a Dutch/EU hospital IT, security, and privacy review — still vendor-independent.
+**Goal:** Resolve patient/order details from the EPD on the fly; pilot-ready for Dutch/EU IT, security, and privacy review.
 
-- Context launch without FHIR first: QR/barcode of Accession or Patient ID (works with any EPD sticker/wristband workflow)
-- **FHIR only if a concrete pilot requires it** (see HL7/FHIR section): read `Patient` / `ServiceRequest` / `ImagingStudy` or SMART launch — never as the image archive API
-- Unscheduled / emergency workflow (create study with generated UIDs under local policy)
+**Identity (planned capability — not an afterthought)**
+
+- Barcode/QR of Patient ID or Accession as the usual trigger
+- **HL7 v2 demographics query** via hospital interface-engine façade (QBP/RSP or site-equivalent) → fill Patient ID, name, DOB, sex, etc. before capture
+- **FHIR R4** `Patient` search/read; optional `ServiceRequest` / `ImagingStudy` for order/exam context; SMART-on-FHIR launch when the EPD supports it
+- Adapter selection per site (HL7, FHIR, or both); map results into the same DICOM patient/study tags used for Store
+- Optional thin **on-prem connector** repo/docs for MLLP↔HTTPS if the site has no FHIR gateway
+- Unscheduled / emergency workflow (generated UIDs under local policy) when no order exists
+
+**Compliance & ops**
+
 - Role-based access (operator vs admin config)
 - Privacy UX: clear “niet blijvend op dit apparaat” messaging; MDM remote wipe assumptions
-- Compliance pack: DPIA/GEB, verwerkersovereenkomst template, NEN 7510 questionnaire answers, SBOM, versioned releases, test evidence
+- Compliance pack: DPIA/GEB (include EHR lookup flows), verwerkersovereenkomst template, NEN 7510 questionnaire answers, SBOM, versioned releases, test evidence
 - MDR pathway decision recorded with counsel; QMS artifacts if classified as device
 
-**Exit criteria:** Pilot-ready build + NL-oriented privacy/security pack; FHIR deferred unless a named site blocks without it.
+**Exit criteria:** At least one HL7 lookup path and one FHIR Patient lookup path demoed against test harnesses; demographics correctly stamped into stored DICOM; NL-oriented privacy/security pack complete.
 
 ---
 
@@ -242,15 +273,18 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 ```
 app/
-  ui/          # Compose screens: worklist, capture, review, settings
+  ui/          # Compose screens: worklist, lookup, capture, review, settings
   capture/     # CameraX photo/video
   dicom/       # Encode SOP instances, UID generation
   network/     # DIMSE + DICOMweb clients
-  identity/    # MWL + QR query models
+  identity/    # PatientDirectory/OrderDirectory: manual, MWL, HL7, FHIR
+  ehr/         # HL7 façade client + FHIR R4 client (Phase 5)
   security/    # crypto, wipe, secure staging
   audit/       # local audit trail
-  config/      # PACS nodes, MDM
+  config/      # PACS nodes, EHR endpoints, MDM
 ```
+
+Optional companion (Phase 5): `connector/` — on-prem HL7 v2 MLLP ↔ HTTPS demographics service for sites that need it.
 
 ---
 
@@ -259,9 +293,10 @@ app/
 | Layer | What |
 |---|---|
 | Unit | Tag builders, UID rules, wipe guarantees, query filters |
-| Integration | Orthanc + MWL SCP in CI/docker |
+| Integration | Orthanc + MWL SCP in CI/docker; later HAPI FHIR + HL7 façade fixtures |
 | Device | CameraX on real Android hardware; MDM config smoke |
 | Conformance | Store/MWL/Find against validator / dciodvfy where applicable |
+| Identity | HL7 and FHIR lookup contract tests; tag-mapping golden tests |
 | Security | No MediaStore leakage; leftover file scan after kill/crash |
 
 ---
@@ -274,13 +309,15 @@ app/
 4. **Primary transfer syntax:** JPEG Baseline vs JPEG-LS vs uncompressed for photos
 5. **MDR classification** for stated intended purpose (NL/EU counsel) — drives QMS depth
 6. **Auth model:** AE-only LAN trust vs user login (OIDC/SAML) in MVP
-7. **FHIR:** confirm stay deferred until a Dutch pilot EPD explicitly needs SMART/FHIR launch (default: yes, defer)
+7. **EHR identity order:** ship HL7 façade and FHIR Patient lookup in the same Phase 5 train (default: yes); which Dutch pilot EPD to target first for FHIR profiles (e.g. Nictiz-oriented)
+8. **On-prem connector:** build our own thin HL7↔HTTPS service vs document “bring your own interface engine” only
 
 ---
 
 ## Phase priority for build start
 
-Ship value in this order: **Phase 0 → 1 → 2 → 3**, with Phase 4 work overlapping Phase 2–3 (DICOMweb spike early). DPIA/MDR drafting starts in Phase 0 and hardens through Phase 5. FHIR stays off the critical path unless a pilot forces it.
+Ship imaging value first: **Phase 0 → 1 → 2 → 3**, with Phase 4 overlapping Phase 2–3.  
+**Design identity interfaces in Phase 0** so HL7 + FHIR plug in cleanly; **implement EHR on-the-fly lookup in Phase 5** (HL7 and FHIR both in scope). DPIA/MDR drafting starts in Phase 0 and must cover EHR query flows before real-patient pilots.
 
 When Phase 0 starts, first concrete tasks:
 

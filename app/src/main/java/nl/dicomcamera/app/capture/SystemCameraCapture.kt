@@ -1,14 +1,11 @@
 package nl.dicomcamera.app.capture
 
 import android.app.Activity
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.activity.result.contract.ActivityResultContract
@@ -18,14 +15,15 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * System-camera capture for OEM devices (esp. ColorOS / Oppo / OnePlus).
+ * System-camera capture without gallery / Photos permission.
  *
- * ColorOS without EXTRA_OUTPUT often returns only a tiny thumbnail in Intent
- * extras ("data") — that looks pixelated when stretched fullscreen. We therefore:
- * 1. Prefer a MediaStore content URI as EXTRA_OUTPUT (full-res write target)
- * 2. Target com.oplus.camera via setPackage (never stub setClassName)
- * 3. Reject thumbnail-sized results and fall back to the newest gallery media
- *    taken after launch
+ * Full-resolution bytes are written into an **app-private** FileProvider URI
+ * (external-files Pictures/capture). We never request READ_MEDIA_* and never
+ * scan the device photo library.
+ *
+ * ColorOS previously returned only Intent thumbnail bitmaps when EXTRA_OUTPUT
+ * was omitted — that looked pixelated fullscreen. We always pass EXTRA_OUTPUT
+ * and reject sub-clinical thumbnail sizes.
  */
 object SystemCameraCapture {
 
@@ -35,9 +33,8 @@ object SystemCameraCapture {
     data class Pending(
         val photo: Boolean,
         val stagingFile: File,
-        val outputUri: Uri?,
-        val mediaStoreUri: Uri?,
-        val useExtraOutput: Boolean,
+        val outputUri: Uri,
+        val outputFile: File,
         val launchedAtEpochMs: Long = System.currentTimeMillis(),
     )
 
@@ -71,24 +68,12 @@ object SystemCameraCapture {
             },
         )
 
-        // Always prefer MediaStore EXTRA_OUTPUT — including ColorOS. Skipping it
-        // previously left us with only Intent thumbnail bitmaps (~few hundred px).
-        val media = insertMediaStore(context, photo)
-        if (media != null) {
-            return Pending(
-                photo = photo,
-                stagingFile = stagingFile,
-                outputUri = media,
-                mediaStoreUri = media,
-                useExtraOutput = true,
-            )
-        }
-
+        // App-private external files — no shared gallery, no READ_MEDIA permission.
         val extDir = File(
             context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
             "capture",
         ).also { it.mkdirs() }
-        val extFile = File(
+        val outputFile = File(
             extDir,
             if (photo) {
                 "capture-${System.currentTimeMillis()}.jpg"
@@ -96,20 +81,21 @@ object SystemCameraCapture {
                 "capture-${System.currentTimeMillis()}.mp4"
             },
         )
-        if (!extFile.exists()) {
-            check(extFile.createNewFile()) { "Cannot create external capture file" }
+        if (outputFile.exists()) {
+            outputFile.delete()
         }
+        check(outputFile.createNewFile()) { "Cannot create capture output file" }
+
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
-            extFile,
+            outputFile,
         )
         return Pending(
             photo = photo,
             stagingFile = stagingFile,
             outputUri = uri,
-            mediaStoreUri = null,
-            useExtraOutput = true,
+            outputFile = outputFile,
         )
     }
 
@@ -123,29 +109,26 @@ object SystemCameraCapture {
             }
         }
 
-        if (pending.useExtraOutput && pending.outputUri != null) {
-            val outputUri = pending.outputUri
-            intent.putExtra(MediaStore.EXTRA_OUTPUT, outputUri)
-            intent.putExtra("return-data", false)
-            intent.addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-            val flags =
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            val query = Intent(intent.action)
-            val targets = context.packageManager.queryIntentActivities(
-                query,
-                PackageManager.MATCH_DEFAULT_ONLY,
-            )
-            val packages = buildSet {
-                preferOemCameraPackage(context)?.let { add(it) }
-                targets.forEach { add(it.activityInfo.packageName) }
-                intent.`package`?.let { add(it) }
-            }
-            for (pkg in packages) {
-                runCatching { context.grantUriPermission(pkg, outputUri, flags) }
-            }
+        intent.putExtra(MediaStore.EXTRA_OUTPUT, pending.outputUri)
+        intent.putExtra("return-data", false)
+        intent.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        )
+        val flags =
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val query = Intent(intent.action)
+        val targets = context.packageManager.queryIntentActivities(
+            query,
+            PackageManager.MATCH_DEFAULT_ONLY,
+        )
+        val packages = buildSet {
+            preferOemCameraPackage(context)?.let { add(it) }
+            targets.forEach { add(it.activityInfo.packageName) }
+            intent.`package`?.let { add(it) }
+        }
+        for (pkg in packages) {
+            runCatching { context.grantUriPermission(pkg, pending.outputUri, flags) }
         }
 
         if (!pending.photo) {
@@ -155,32 +138,46 @@ object SystemCameraCapture {
     }
 
     fun finalizeCapture(context: Context, pending: Pending, resultData: Intent?): FinalizeInfo {
-        data class Candidate(val uri: Uri?, val label: String, val allowThumb: Boolean = false)
+        data class Candidate(val label: String, val tryLoad: () -> Boolean)
 
         val candidates = buildList {
-            pending.mediaStoreUri?.let { add(Candidate(it, "mediastore")) }
-            pending.outputUri?.let { add(Candidate(it, "output")) }
-            resultData?.data?.let { add(Candidate(it, "result.data")) }
+            // Primary: app-private FileProvider file the camera was asked to write.
+            add(
+                Candidate("fileprovider") {
+                    copyFileIfPresent(pending.outputFile, pending.stagingFile)
+                },
+            )
+            add(
+                Candidate("fileprovider.uri") {
+                    copyUriToFile(context, pending.outputUri, pending.stagingFile)
+                },
+            )
+            resultData?.data?.let { uri ->
+                add(
+                    Candidate("result.data") {
+                        copyUriToFile(context, uri, pending.stagingFile)
+                    },
+                )
+            }
             resultData?.clipData?.let { clip ->
                 for (i in 0 until clip.itemCount) {
-                    clip.getItemAt(i)?.uri?.let { add(Candidate(it, "clip[$i]")) }
+                    val uri = clip.getItemAt(i)?.uri ?: continue
+                    add(
+                        Candidate("clip[$i]") {
+                            copyUriToFile(context, uri, pending.stagingFile)
+                        },
+                    )
                 }
-            }
-            // ColorOS often saves full-res to DCIM even when EXTRA_OUTPUT is ignored.
-            findNewestMedia(context, pending.photo, pending.launchedAtEpochMs)?.let {
-                add(Candidate(it, "gallery.newest"))
             }
         }
 
         for (candidate in candidates) {
-            val uri = candidate.uri ?: continue
-            if (!copyUriToFile(context, uri, pending.stagingFile)) continue
+            if (!candidate.tryLoad()) continue
             val meta = readImageMeta(pending.stagingFile, pending.photo)
             if (pending.photo && !isFullResEnough(meta.width, meta.height, pending.stagingFile.length())) {
-                // Keep looking for a full-res source; do not settle on a thumbnail URI.
                 continue
             }
-            cleanupTempMedia(context, pending, keepGallery = candidate.label.startsWith("gallery"))
+            wipeOutput(pending)
             return FinalizeInfo(
                 ok = true,
                 width = meta.width,
@@ -190,63 +187,49 @@ object SystemCameraCapture {
             )
         }
 
-        // Last resort: Intent thumbnail bitmap (ColorOS classic). Prefer rejecting over
-        // storing unusable clinical pixels when gallery lookup also failed.
+        // Reject Intent thumbnail — not suitable for clinical use, and we do not
+        // fall back to scanning the device photo library.
         if (pending.photo) {
             @Suppress("DEPRECATION")
             val thumb = resultData?.extras?.getParcelable<android.graphics.Bitmap>("data")
             if (thumb != null) {
-                pending.stagingFile.parentFile?.mkdirs()
-                FileOutputStream(pending.stagingFile).use { out ->
-                    thumb.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
-                }
-                val w = thumb.width
-                val h = thumb.height
-                val enough = isFullResEnough(w, h, pending.stagingFile.length())
-                cleanupTempMedia(context, pending, keepGallery = false)
+                wipeOutput(pending)
                 return FinalizeInfo(
-                    ok = enough,
-                    width = w,
-                    height = h,
-                    bytes = pending.stagingFile.length(),
+                    ok = false,
+                    width = thumb.width,
+                    height = thumb.height,
+                    bytes = 0,
                     source = "intent.thumbnail",
-                    warning = if (enough) {
-                        null
-                    } else {
-                        "Camera returned thumbnail only (${w}x${h}). Full-res unavailable."
-                    },
+                    warning = "Camera returned thumbnail only (${thumb.width}x${thumb.height}). " +
+                        "Full-resolution capture failed — try again.",
                 )
             }
         }
 
-        cleanupTempMedia(context, pending, keepGallery = false)
-        return FinalizeInfo(ok = false, source = "none")
+        wipeOutput(pending)
+        return FinalizeInfo(
+            ok = false,
+            source = "none",
+            warning = "Camera did not write a full-resolution file — try again.",
+        )
     }
 
     fun abandon(context: Context, pending: Pending?) {
         if (pending == null) return
-        pending.mediaStoreUri?.let { uri ->
-            runCatching { context.contentResolver.delete(uri, null, null) }
-        }
+        wipeOutput(pending)
         runCatching {
             if (pending.stagingFile.exists()) pending.stagingFile.delete()
         }
     }
 
-    private fun cleanupTempMedia(context: Context, pending: Pending, keepGallery: Boolean) {
-        pending.mediaStoreUri?.let { uri ->
-            runCatching { context.contentResolver.delete(uri, null, null) }
-        }
-        // Do not delete gallery.newest — we already copied; deleting needs broad media access
-        // and may remove the user's only DCIM copy if copy failed partially.
-        if (!keepGallery && !pending.useExtraOutput) {
-            // no-op reserved
+    private fun wipeOutput(pending: Pending) {
+        runCatching {
+            if (pending.outputFile.exists()) pending.outputFile.delete()
         }
     }
 
     private fun isFullResEnough(width: Int, height: Int, bytes: Long): Boolean {
         if (maxOf(width, height) >= MIN_FULLRES_EDGE) return true
-        // Videos / unknown bounds: accept reasonably large files.
         if (width <= 0 && height <= 0 && bytes >= 200_000L) return true
         return bytes >= 500_000L
     }
@@ -258,47 +241,6 @@ object SystemCameraCapture {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, opts)
         return Dims(opts.outWidth.coerceAtLeast(0), opts.outHeight.coerceAtLeast(0))
-    }
-
-    private fun findNewestMedia(context: Context, photo: Boolean, takenAfterEpochMs: Long): Uri? {
-        return try {
-            val collection = if (photo) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                }
-            } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                }
-            }
-            val idColumn = MediaStore.MediaColumns._ID
-            val dateColumn = MediaStore.MediaColumns.DATE_ADDED
-            val sizeColumn = MediaStore.MediaColumns.SIZE
-            val minSec = ((takenAfterEpochMs / 1000L) - 15L).coerceAtLeast(0L)
-            context.contentResolver.query(
-                collection,
-                arrayOf(idColumn, dateColumn, sizeColumn),
-                "$dateColumn >= ?",
-                arrayOf(minSec.toString()),
-                "$dateColumn DESC",
-            )?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val size = cursor.getLong(2)
-                    if (size in 1 until 50_000L && photo) continue // skip tiny thumbs in gallery
-                    val id = cursor.getLong(0)
-                    return@use ContentUris.withAppendedId(collection, id)
-                }
-                null
-            }
-        } catch (_: SecurityException) {
-            null
-        } catch (_: Exception) {
-            null
-        }
     }
 
     private fun baseIntent(photo: Boolean): Intent {
@@ -322,47 +264,14 @@ object SystemCameraCapture {
         return null
     }
 
-    private fun insertMediaStore(context: Context, photo: Boolean): Uri? {
-        val resolver = context.contentResolver
-        val name = "dicomcamera-${System.currentTimeMillis()}"
+    private fun copyFileIfPresent(src: File, dest: File): Boolean {
+        if (!src.exists() || src.length() == 0L) return false
         return try {
-            if (photo) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, "$name.jpg")
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(
-                            MediaStore.Images.Media.RELATIVE_PATH,
-                            Environment.DIRECTORY_PICTURES + "/DicomCamera",
-                        )
-                    }
-                }
-                val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                }
-                resolver.insert(collection, values)
-            } else {
-                val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, "$name.mp4")
-                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(
-                            MediaStore.Video.Media.RELATIVE_PATH,
-                            Environment.DIRECTORY_MOVIES + "/DicomCamera",
-                        )
-                    }
-                }
-                val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                }
-                resolver.insert(collection, values)
-            }
+            dest.parentFile?.mkdirs()
+            src.copyTo(dest, overwrite = true)
+            dest.exists() && dest.length() > 0L
         } catch (_: Exception) {
-            null
+            false
         }
     }
 

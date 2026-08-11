@@ -71,6 +71,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nl.dicomcamera.app.demo.DemoPatients
+import nl.dicomcamera.app.demo.LocalArchiveStore
 import nl.dicomcamera.app.diagnostics.DiagnosticLog
 import nl.dicomcamera.app.diagnostics.HostPing
 import nl.dicomcamera.app.session.CaptureKind
@@ -90,6 +92,7 @@ import nl.dicomcamera.app.ui.components.ForestButton
 import nl.dicomcamera.app.ui.components.MainTab
 import nl.dicomcamera.app.ui.components.MetaChip
 import nl.dicomcamera.app.ui.components.QuietOutlinedButton
+import nl.dicomcamera.app.ui.components.ResultRow
 import nl.dicomcamera.app.ui.components.SectionLabel
 import nl.dicomcamera.app.ui.components.SegmentedChoice
 import nl.dicomcamera.app.ui.components.SoftPanel
@@ -157,6 +160,9 @@ fun Phase3App() {
     val pendingQueue = remember {
         PendingStoreQueue(File(context.filesDir, "pending"), staging)
     }
+    val localArchive = remember {
+        LocalArchiveStore(File(context.filesDir, "local-archive"), staging)
+    }
     val audit = remember { AuditLog(File(context.filesDir, "audit/audit.csv")) }
     val diagnosticLog = remember {
         DiagnosticLog(File(context.filesDir, "logs/diagnostic.log"))
@@ -182,6 +188,7 @@ fun Phase3App() {
     var statusNote by remember { mutableStateOf("") }
     var sendProgress by remember { mutableStateOf("") }
     var pendingItems by remember { mutableStateOf(pendingQueue.list()) }
+    var readyStudies by remember { mutableStateOf(localArchive.list()) }
     var logUiTick by remember { mutableStateOf(0) }
 
     val downloadLogLauncher = rememberLauncherForActivityResult(
@@ -216,6 +223,10 @@ fun Phase3App() {
 
     fun refreshPending() {
         pendingItems = pendingQueue.list()
+    }
+
+    fun refreshArchive() {
+        readyStudies = localArchive.list()
     }
 
     fun startNewSession(selection: ExamSelection) {
@@ -349,11 +360,6 @@ fun Phase3App() {
                         }
                     },
                     onWorklistSelected = { entry: WorklistEntry ->
-                        if (!pacsSettings.isConfigured()) {
-                            statusNote = "Configure PACS in Settings first"
-                            selectMainTab(MainTab.Settings)
-                            return@WorklistTab
-                        }
                         val ctx = entry.toPatientStudyContext("Clinical photo/video session").copy(
                             bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
                             laterality = patient.laterality.takeIf { it.isNotBlank() },
@@ -381,10 +387,6 @@ fun Phase3App() {
                     onContinueManual = {
                         when {
                             !patient.isValid() -> statusNote = "Patient ID and Name are required"
-                            !pacsSettings.isConfigured() -> {
-                                statusNote = "Configure PACS in Settings first"
-                                selectMainTab(MainTab.Settings)
-                            }
                             else -> {
                                 statusNote = ""
                                 startNewSession(
@@ -483,51 +485,147 @@ fun Phase3App() {
                 )
 
                 Destination.Archive -> {
-                    if (!pacsSettings.isConfigured()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            StatusBanner(
-                                text = "Configure PACS in Settings before querying the archive.",
-                                tone = StatusTone.Warn,
+                    LaunchedEffect(Unit) { refreshArchive() }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        SoftPanel {
+                            SectionLabel("Ready to send")
+                            Text(
+                                "Local captures waiting for PACS. Send when Remote DICOM is configured.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DicomColors.Slate700,
                             )
-                            ForestButton(
+                            if (readyStudies.isEmpty()) {
+                                Text(
+                                    "No local studies yet. Pick a demo patient on Worklist, take photos, then Save to Archive.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DicomColors.Slate500,
+                                )
+                            }
+                            readyStudies.forEach { study ->
+                                SoftPanel {
+                                    Text(
+                                        "${study.patientId} · ${study.patientName}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        listOfNotNull(
+                                            study.accessionNumber?.let { "Acc $it" },
+                                            "${study.photoCount} photo(s)",
+                                            study.studyDescription,
+                                        ).joinToString(" · "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = DicomColors.Slate700,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        ForestButton(
+                                            text = "Send",
+                                            onClick = {
+                                                if (!pacsSettings.isConfigured()) {
+                                                    statusNote = "Configure PACS in Settings to send"
+                                                    selectMainTab(MainTab.Settings)
+                                                    return@ForestButton
+                                                }
+                                                destination = Destination.Sending
+                                                sendProgress = "Sending archive…"
+                                                scope.launch {
+                                                    val items = localArchive.toSessionItems(study)
+                                                    val tempSession = CaptureSession(
+                                                        studyInstanceUid = study.studyInstanceUid,
+                                                        seriesInstanceUid = study.seriesInstanceUid,
+                                                        items = items,
+                                                    )
+                                                    val outcome = withContext(Dispatchers.IO) {
+                                                        batchSender.sendAll(
+                                                            session = tempSession,
+                                                            examContext = study.toContext(),
+                                                            settings = pacsSettings,
+                                                            examSource = "LOCAL_ARCHIVE",
+                                                        ) { progress ->
+                                                            sendProgress = progress.message
+                                                        }
+                                                    }
+                                                    if (outcome.allSucceeded) {
+                                                        localArchive.markSentAndWipe(study.id)
+                                                        refreshArchive()
+                                                    } else {
+                                                        refreshPending()
+                                                    }
+                                                    resultSuccess = outcome.allSucceeded
+                                                    resultMessage = outcome.message
+                                                    destination = Destination.Result
+                                                }
+                                            },
+                                            compact = true,
+                                            enabled = pacsSettings.isConfigured(),
+                                        )
+                                        QuietOutlinedButton(
+                                            text = "Discard",
+                                            onClick = {
+                                                localArchive.discard(study.id)
+                                                refreshArchive()
+                                            },
+                                        )
+                                    }
+                                    if (!pacsSettings.isConfigured()) {
+                                        Text(
+                                            "Configure Remote DICOM to enable Send.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = DicomColors.Slate500,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (pacsSettings.isConfigured()) {
+                            SoftPanel {
+                                SectionLabel("Append from PACS")
+                            }
+                            AppendStudyScreen(
+                                node = pacsSettings.toNode(),
+                                embedded = true,
+                                onSelected = { entry: StudyEntry ->
+                                    val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
+                                        bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
+                                        laterality = patient.laterality.takeIf { it.isNotBlank() },
+                                    )
+                                    startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
+                                    patient = ManualPatientForm(
+                                        patientId = entry.patientId,
+                                        patientName = entry.patientName,
+                                        birthDate = entry.patientBirthDate.orEmpty(),
+                                        sex = entry.patientSex.orEmpty(),
+                                        accessionNumber = entry.accessionNumber.orEmpty(),
+                                        studyDescription = entry.studyDescription.orEmpty(),
+                                        bodyPartExamined = patient.bodyPartExamined,
+                                        laterality = patient.laterality,
+                                    )
+                                    audit.record(
+                                        "select_append_study",
+                                        patientId = entry.patientId,
+                                        studyUid = entry.studyInstanceUid,
+                                        detail = entry.accessionNumber.orEmpty(),
+                                    )
+                                    destination = Destination.Capture
+                                },
+                            )
+                        } else {
+                            StatusBanner(
+                                text = "Configure Remote DICOM in Settings to query PACS archive for append.",
+                                tone = StatusTone.Info,
+                            )
+                            QuietOutlinedButton(
                                 text = "Open Settings",
                                 onClick = { selectMainTab(MainTab.Settings) },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                    } else {
-                        AppendStudyScreen(
-                            node = pacsSettings.toNode(),
-                            onSelected = { entry: StudyEntry ->
-                                val ctx = entry.toPatientStudyContext("Additional clinical photo/video").copy(
-                                    bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                                    laterality = patient.laterality.takeIf { it.isNotBlank() },
-                                )
-                                startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
-                                patient = ManualPatientForm(
-                                    patientId = entry.patientId,
-                                    patientName = entry.patientName,
-                                    birthDate = entry.patientBirthDate.orEmpty(),
-                                    sex = entry.patientSex.orEmpty(),
-                                    accessionNumber = entry.accessionNumber.orEmpty(),
-                                    studyDescription = entry.studyDescription.orEmpty(),
-                                    bodyPartExamined = patient.bodyPartExamined,
-                                    laterality = patient.laterality,
-                                )
-                                audit.record(
-                                    "select_append_study",
-                                    patientId = entry.patientId,
-                                    studyUid = entry.studyInstanceUid,
-                                    detail = entry.accessionNumber.orEmpty(),
-                                )
-                                destination = Destination.Capture
-                            },
-                        )
                     }
                 }
 
@@ -535,6 +633,11 @@ fun Phase3App() {
                     patientBanner = exam?.banner ?: "${patient.patientId} · ${patient.patientName}",
                     session = session,
                     staging = staging,
+                    primaryActionLabel = if (pacsSettings.isConfigured()) {
+                        "Send to PACS"
+                    } else {
+                        "Save to Archive"
+                    },
                     onAddItem = { item -> session = session.add(item) },
                     onDiscardItem = { id ->
                         session = batchSender.discardItem(session, id)
@@ -547,6 +650,31 @@ fun Phase3App() {
                         }
                         if (session.pendingSendCount == 0) {
                             statusNote = "Add at least one photo or video"
+                            return@CaptureSessionScreen
+                        }
+                        if (!pacsSettings.isConfigured()) {
+                            scope.launch {
+                                val outcome = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        localArchive.saveSession(session, currentExam.context)
+                                    }
+                                }
+                                outcome.onSuccess { ready ->
+                                    session = batchSender.discardSession(session)
+                                    refreshArchive()
+                                    audit.record(
+                                        "archive_local",
+                                        patientId = ready.patientId,
+                                        studyUid = ready.studyInstanceUid,
+                                        detail = "${ready.photoCount} photo(s)",
+                                    )
+                                    diagnosticLog.log("archive_local", ready.id)
+                                    statusNote = "Saved to Archive — ready to send"
+                                    selectMainTab(MainTab.Archive)
+                                }.onFailure { e ->
+                                    statusNote = "Archive failed: ${e.message}"
+                                }
+                            }
                             return@CaptureSessionScreen
                         }
                         destination = Destination.Sending
@@ -704,23 +832,45 @@ private fun WorklistTab(
 
         when (mode) {
             WorklistMode.Worklist -> {
-                if (!pacsConfigured) {
-                    StatusBanner(
-                        text = "PACS not configured. Configure Remote DICOM in Settings to query the worklist.",
-                        tone = StatusTone.Warn,
+                SoftPanel {
+                    SectionLabel("Demo patients")
+                    Text(
+                        "Two sample cases for exploring capture without a live PACS.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DicomColors.Slate700,
                     )
-                    QuietOutlinedButton(
-                        text = "Open Settings",
-                        onClick = onOpenSettings,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
+                    DemoPatients.entries.forEach { entry ->
+                        ResultRow(
+                            title = "${entry.patientId} · ${entry.patientName}",
+                            subtitle = listOfNotNull(
+                                entry.accessionNumber?.let { "Acc $it" },
+                                entry.scheduledStartDate,
+                                entry.studyDescription,
+                            ).joinToString(" · "),
+                            onClick = { onWorklistSelected(entry) },
+                            trailing = {
+                                MetaChip(text = "Demo", foreground = DicomColors.GoldInk)
+                            },
+                        )
+                    }
+                }
+                if (pacsConfigured) {
                     WorklistScreen(
                         node = node,
                         callingAeTitle = callingAeTitle,
                         onSelected = onWorklistSelected,
                         embedded = true,
                         modality = modality,
+                    )
+                } else {
+                    StatusBanner(
+                        text = "Live MWL needs Remote DICOM in Settings. Demo patients work offline.",
+                        tone = StatusTone.Info,
+                    )
+                    QuietOutlinedButton(
+                        text = "Open Settings",
+                        onClick = onOpenSettings,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
@@ -813,14 +963,10 @@ private fun WorklistTab(
                         onSelect = { onPatientChange(patient.copy(laterality = it)) },
                     )
                     if (!pacsConfigured) {
-                        StatusBanner(
-                            text = "Configure Remote DICOM in Settings before sending captures.",
-                            tone = StatusTone.Warn,
-                        )
-                        QuietOutlinedButton(
-                            text = "Open Settings",
-                            onClick = onOpenSettings,
-                            modifier = Modifier.fillMaxWidth(),
+                        Text(
+                            "Without PACS, captures save to Archive ready to send later.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DicomColors.Slate500,
                         )
                     }
                     ForestButton(
@@ -881,6 +1027,7 @@ private fun CaptureSessionScreen(
     patientBanner: String,
     session: CaptureSession,
     staging: SecureStaging,
+    primaryActionLabel: String,
     onAddItem: (SessionItem) -> Unit,
     onDiscardItem: (String) -> Unit,
     onSendAll: () -> Unit,
@@ -1105,7 +1252,7 @@ private fun CaptureSessionScreen(
         }
 
         ForestButton(
-            text = "Send all (${session.pendingSendCount})",
+            text = "$primaryActionLabel (${session.pendingSendCount})",
             onClick = onSendAll,
             enabled = session.pendingSendCount > 0 && !isRecording,
             modifier = Modifier.fillMaxWidth(),

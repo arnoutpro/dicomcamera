@@ -311,6 +311,7 @@ private fun worklistComparator(sort: WorklistSort): Comparator<WorklistEntry> =
 fun AppendStudyScreen(
     node: DicomNode,
     onSelected: (StudyEntry) -> Unit,
+    embedded: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var patientId by remember { mutableStateOf("") }
@@ -320,15 +321,9 @@ fun AppendStudyScreen(
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
+    val body: @Composable () -> Unit = {
         SoftPanel {
-            SectionLabel("Query")
+            SectionLabel(if (embedded) "PACS query" else "Query")
             DicomTextField(
                 value = patientId,
                 onValueChange = { patientId = it },
@@ -414,5 +409,18 @@ fun AppendStudyScreen(
                 },
             )
         }
+    }
+
+    if (embedded) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = { body() })
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = { body() },
+        )
     }
 }

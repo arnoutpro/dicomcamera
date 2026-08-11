@@ -187,9 +187,12 @@ class SettingsRepository(private val context: Context) {
         ManagedConfig.merge(context, local)
     }
 
-    suspend fun save(settings: PacsSettings) {
+    /**
+     * Persist settings. Returns false when MDM owns config and local save is skipped.
+     */
+    suspend fun save(settings: PacsSettings): Boolean {
         if (ManagedConfig.isManaged(context)) {
-            return
+            return false
         }
         context.dataStore.edit { prefs ->
             prefs[Keys.calling] = settings.callingAeTitle.trim()
@@ -211,5 +214,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.adminLocked] = settings.adminConfigLocked
             prefs[Keys.loggingEnabled] = settings.loggingEnabled
         }
+        return true
     }
 }

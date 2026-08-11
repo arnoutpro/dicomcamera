@@ -20,10 +20,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +56,7 @@ private enum class SettingsSection {
 
 /**
  * Settings hub: Transport, Local AE, Remote DICOM, EHR identity (HL7+FHIR), Logging/ATNA.
+ * Draft edits auto-save when leaving a section or leaving Settings entirely.
  */
 @Composable
 fun SettingsFlow(
@@ -72,6 +75,24 @@ fun SettingsFlow(
     var section by remember { mutableStateOf(SettingsSection.Hub) }
     var draft by remember(initial) { mutableStateOf(initial) }
     val locked = !draft.settingsEditable()
+    val latestDraft = rememberUpdatedState(draft)
+
+    // Persist when leaving the Settings tab (composition disposed).
+    DisposableEffect(Unit) {
+        onDispose {
+            onSave(latestDraft.value)
+        }
+    }
+
+    fun persistAnd(block: () -> Unit = {}) {
+        onSave(draft)
+        block()
+    }
+
+    fun goHub(persist: Boolean = true) {
+        if (persist) onSave(draft)
+        section = SettingsSection.Hub
+    }
 
     SideEffect {
         onTitleChange(
@@ -94,20 +115,22 @@ fun SettingsFlow(
             onOpenRemote = { section = SettingsSection.RemoteDicom },
             onOpenEhr = { section = SettingsSection.EhrIdentity },
             onOpenLogging = { section = SettingsSection.Logging },
-            onSave = { onSave(draft) },
+            onSave = { persistAnd() },
             connectivityStatus = connectivityStatus,
         )
         SettingsSection.Transport -> TransportSection(
             draft = draft,
             locked = locked,
             onChange = { draft = it },
-            onBack = { section = SettingsSection.Hub },
+            onBack = { goHub() },
+            onSave = { persistAnd() },
         )
         SettingsSection.LocalAe -> LocalAeSection(
             draft = draft,
             locked = locked,
             onChange = { draft = it },
-            onBack = { section = SettingsSection.Hub },
+            onBack = { goHub() },
+            onSave = { persistAnd() },
         )
         SettingsSection.RemoteDicom -> RemoteDicomSection(
             draft = draft,
@@ -116,13 +139,15 @@ fun SettingsFlow(
             onChange = { draft = it },
             onPing = { onPing(draft) },
             onEcho = { onEcho(draft) },
-            onBack = { section = SettingsSection.Hub },
+            onBack = { goHub() },
+            onSave = { persistAnd() },
         )
         SettingsSection.EhrIdentity -> EhrIdentitySection(
             draft = draft,
             locked = locked,
             onChange = { draft = it },
-            onBack = { section = SettingsSection.Hub },
+            onBack = { goHub() },
+            onSave = { persistAnd() },
         )
         SettingsSection.Logging -> LoggingSection(
             draft = draft,
@@ -135,7 +160,7 @@ fun SettingsFlow(
             onDownloadLog = onDownloadLog,
             onClearLog = onClearLog,
             onExportAtna = onExportAtna,
-            onBack = { section = SettingsSection.Hub },
+            onBack = { goHub() },
         )
     }
 }
@@ -271,6 +296,7 @@ private fun TransportSection(
     locked: Boolean,
     onChange: (PacsSettings) -> Unit,
     onBack: () -> Unit,
+    onSave: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -279,7 +305,7 @@ private fun TransportSection(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        QuietOutlinedButton(text = "← Back & save", onClick = onBack)
         ScreenTitle(
             title = "Transport",
             subtitle = "How this device talks to the archive (Phase 4 dual stack).",
@@ -321,6 +347,12 @@ private fun TransportSection(
                 color = DicomColors.Slate700,
             )
         }
+        ForestButton(
+            text = "Save",
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !locked,
+        )
     }
 }
 
@@ -330,6 +362,7 @@ private fun LocalAeSection(
     locked: Boolean,
     onChange: (PacsSettings) -> Unit,
     onBack: () -> Unit,
+    onSave: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -338,7 +371,7 @@ private fun LocalAeSection(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        QuietOutlinedButton(text = "← Back & save", onClick = onBack)
         ScreenTitle(
             title = "Local AE",
             subtitle = "How this device identifies itself on the DICOM network.",
@@ -379,12 +412,13 @@ private fun LocalAeSection(
         SoftPanel {
             SectionLabel("Summary")
             Text(draft.localSummary(), style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "Tap Save all settings on the Settings hub to persist.",
-                style = MaterialTheme.typography.bodySmall,
-                color = DicomColors.Slate500,
-            )
         }
+        ForestButton(
+            text = "Save",
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !locked,
+        )
     }
 }
 
@@ -397,6 +431,7 @@ private fun RemoteDicomSection(
     onPing: () -> Unit,
     onEcho: () -> Unit,
     onBack: () -> Unit,
+    onSave: () -> Unit,
 ) {
     val hostReady = draft.host.isNotBlank()
     Column(
@@ -406,7 +441,7 @@ private fun RemoteDicomSection(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        QuietOutlinedButton(text = "← Back & save", onClick = onBack)
         ScreenTitle(
             title = "Remote DICOM",
             subtitle = "Archive / PACS endpoint for worklist, query, and store.",
@@ -541,6 +576,17 @@ private fun RemoteDicomSection(
                 StatusBanner(text = connectivityStatus, tone = connectivityTone(connectivityStatus))
             }
         }
+        ForestButton(
+            text = "Save Remote DICOM",
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !locked,
+        )
+        Text(
+            "Changes also save when you tap Back or leave Settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = DicomColors.Slate500,
+        )
     }
 }
 
@@ -550,6 +596,7 @@ private fun EhrIdentitySection(
     locked: Boolean,
     onChange: (PacsSettings) -> Unit,
     onBack: () -> Unit,
+    onSave: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -558,7 +605,7 @@ private fun EhrIdentitySection(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        QuietOutlinedButton(text = "← Back & save", onClick = onBack)
         ScreenTitle(
             title = "EHR identity",
             subtitle = "Resolve demographics from the EPD via FHIR and/or HL7 façade. Pixels still go to PACS only.",
@@ -706,8 +753,14 @@ private fun EhrIdentitySection(
                 )
             }
         }
+        ForestButton(
+            text = "Save",
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !draft.managedByMdm,
+        )
         Text(
-            "Tap Save all settings on the Settings hub to persist.",
+            "Changes also save when you tap Back or leave Settings.",
             style = MaterialTheme.typography.bodySmall,
             color = DicomColors.Slate500,
         )
@@ -732,7 +785,7 @@ private fun LoggingSection(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        QuietOutlinedButton(text = "← Back to Settings", onClick = onBack)
+        QuietOutlinedButton(text = "← Back & save", onClick = onBack)
         ScreenTitle(
             title = "Logging",
             subtitle = "Diagnostic log for support. Off by default — turn on only when troubleshooting.",

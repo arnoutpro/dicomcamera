@@ -93,6 +93,7 @@ import nl.dicomcamera.app.ui.components.MetaChip
 import nl.dicomcamera.app.ui.components.QuietOutlinedButton
 import nl.dicomcamera.app.ui.components.ScreenTitle
 import nl.dicomcamera.app.ui.components.SectionLabel
+import nl.dicomcamera.app.ui.components.SegmentedChoice
 import nl.dicomcamera.app.ui.components.SoftPanel
 import nl.dicomcamera.app.ui.components.StatusBanner
 import nl.dicomcamera.app.ui.components.StatusTone
@@ -113,6 +114,11 @@ import java.io.FileInputStream
 import java.time.Instant
 
 private const val TAG = "Phase3App"
+
+private enum class WorklistMode {
+    Worklist,
+    Manual,
+}
 
 private enum class Destination {
     Worklist,
@@ -302,6 +308,7 @@ fun Phase3App() {
                     selectedBanner = exam?.banner,
                     node = pacsSettings.toNode(),
                     callingAeTitle = pacsSettings.callingAeTitle,
+                    modality = pacsSettings.modality.ifBlank { "XC" },
                     onOpenPending = {
                         refreshPending()
                         destination = Destination.Pending
@@ -309,7 +316,7 @@ fun Phase3App() {
                     onOpenSettings = { selectMainTab(MainTab.Settings) },
                     onQueryHl7 = {
                         scope.launch {
-                            statusNote = "HL7 lookup…"
+                            statusNote = "HL7 ADT lookup…"
                             diagnosticLog.log("hl7_lookup_start", patient.patientId.trim())
                             val outcome = withContext(Dispatchers.IO) {
                                 runCatching {
@@ -318,6 +325,7 @@ fun Phase3App() {
                                     ).findPatients(
                                         nl.dicomcamera.identity.PatientQuery(
                                             patientId = patient.patientId.trim(),
+                                            patientName = patient.patientName.trim().ifBlank { null },
                                         ),
                                     )
                                 }
@@ -675,12 +683,15 @@ private fun WorklistTab(
     selectedBanner: String?,
     node: nl.dicomcamera.dicom.DicomNode,
     callingAeTitle: String,
+    modality: String,
     onOpenPending: () -> Unit,
     onOpenSettings: () -> Unit,
     onQueryHl7: () -> Unit,
     onWorklistSelected: (WorklistEntry) -> Unit,
     onContinueManual: () -> Unit,
 ) {
+    var mode by remember { mutableStateOf(WorklistMode.Worklist) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -690,21 +701,22 @@ private fun WorklistTab(
     ) {
         BrandWordmark(size = 22)
         ScreenTitle(
-            title = "Worklist",
-            subtitle = "MWL, HL7 demographics, or manual entry.",
+            title = if (mode == WorklistMode.Worklist) "Worklist" else "Manual",
+            subtitle = if (mode == WorklistMode.Worklist) {
+                "Scheduled patients from the modality worklist."
+            } else {
+                "HL7 ADT demographics query or enter patient details by hand."
+            },
         )
 
-        if (!pacsConfigured) {
-            StatusBanner(
-                text = "PACS not configured. Configure Remote DICOM in Settings to query MWL / send.",
-                tone = StatusTone.Warn,
-            )
-            QuietOutlinedButton(
-                text = "Open Settings",
-                onClick = onOpenSettings,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        SegmentedChoice(
+            leftLabel = "Worklist",
+            rightLabel = "Manual",
+            leftSelected = mode == WorklistMode.Worklist,
+            onLeft = { mode = WorklistMode.Worklist },
+            onRight = { mode = WorklistMode.Manual },
+        )
+
         if (!selectedBanner.isNullOrBlank()) {
             StatusBanner(text = "Selected: $selectedBanner", tone = StatusTone.Info)
         }
@@ -712,88 +724,134 @@ private fun WorklistTab(
             StatusBanner(text = statusNote, tone = StatusTone.Info)
         }
 
-        SoftPanel {
-            SectionLabel("Modality worklist")
-            if (pacsConfigured) {
-                WorklistScreen(
-                    node = node,
-                    callingAeTitle = callingAeTitle,
-                    onSelected = onWorklistSelected,
-                    embedded = true,
-                )
-            } else {
-                Text(
-                    "Connect a PACS in Settings → Remote DICOM to query today’s worklist.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DicomColors.Slate700,
-                )
+        when (mode) {
+            WorklistMode.Worklist -> {
+                if (!pacsConfigured) {
+                    StatusBanner(
+                        text = "PACS not configured. Configure Remote DICOM in Settings to query the worklist.",
+                        tone = StatusTone.Warn,
+                    )
+                    QuietOutlinedButton(
+                        text = "Open Settings",
+                        onClick = onOpenSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    WorklistScreen(
+                        node = node,
+                        callingAeTitle = callingAeTitle,
+                        onSelected = onWorklistSelected,
+                        embedded = true,
+                        modality = modality,
+                    )
+                }
             }
-        }
+            WorklistMode.Manual -> {
+                SoftPanel {
+                    SectionLabel("HL7 ADT query")
+                    Text(
+                        "Look up demographics on the hospital HL7 façade (ADT / QBP). Does not use DICOM C-ECHO.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DicomColors.Slate700,
+                    )
+                    DicomTextField(
+                        value = patient.patientId,
+                        onValueChange = { onPatientChange(patient.copy(patientId = it)) },
+                        label = "Patient ID *",
+                    )
+                    DicomTextField(
+                        value = patient.patientName,
+                        onValueChange = { onPatientChange(patient.copy(patientName = it)) },
+                        label = "Patient Name (optional for query)",
+                    )
+                    QuietOutlinedButton(
+                        text = if (hl7Configured) {
+                            "Query HL7 ADT"
+                        } else {
+                            "Query HL7 (configure in Settings)"
+                        },
+                        onClick = onQueryHl7,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = hl7Configured && patient.patientId.isNotBlank(),
+                    )
+                    if (!hl7Configured) {
+                        Text(
+                            "Enable Settings → HL7 demographics and set the façade URL.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DicomColors.Slate500,
+                        )
+                    }
+                }
 
-        SoftPanel {
-            SectionLabel("Patient demographics")
-            DicomTextField(
-                value = patient.patientId,
-                onValueChange = { onPatientChange(patient.copy(patientId = it)) },
-                label = "Patient ID *",
-            )
-            QuietOutlinedButton(
-                text = if (hl7Configured) "Query HL7 demographics" else "Query HL7 (configure in Settings)",
-                onClick = onQueryHl7,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = hl7Configured && patient.patientId.isNotBlank(),
-            )
-            if (!hl7Configured) {
-                Text(
-                    "Enable Settings → HL7 demographics and set the façade URL.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DicomColors.Slate500,
-                )
+                SoftPanel {
+                    SectionLabel("Patient details")
+                    Text(
+                        "Edit fields after HL7 lookup, or enter everything manually.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DicomColors.Slate700,
+                    )
+                    DicomTextField(
+                        value = patient.patientId,
+                        onValueChange = { onPatientChange(patient.copy(patientId = it)) },
+                        label = "Patient ID *",
+                    )
+                    DicomTextField(
+                        value = patient.patientName,
+                        onValueChange = { onPatientChange(patient.copy(patientName = it)) },
+                        label = "Patient Name * (FAMILY^GIVEN)",
+                    )
+                    DicomTextField(
+                        value = patient.birthDate,
+                        onValueChange = {
+                            onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
+                        },
+                        label = "Birth date (YYYYMMDD)",
+                    )
+                    SectionLabel("Sex")
+                    ChoiceRow(
+                        options = listOf("" to "-", "M" to "M", "F" to "F", "O" to "O"),
+                        selected = patient.sex,
+                        onSelect = { onPatientChange(patient.copy(sex = it)) },
+                    )
+                    DicomTextField(
+                        value = patient.accessionNumber,
+                        onValueChange = { onPatientChange(patient.copy(accessionNumber = it)) },
+                        label = "Accession (optional)",
+                    )
+                    DicomTextField(
+                        value = patient.studyDescription,
+                        onValueChange = { onPatientChange(patient.copy(studyDescription = it)) },
+                        label = "Study description (optional)",
+                    )
+                    DicomTextField(
+                        value = patient.bodyPartExamined,
+                        onValueChange = { onPatientChange(patient.copy(bodyPartExamined = it.uppercase())) },
+                        label = "Body part (e.g. HAND, FOOT)",
+                    )
+                    SectionLabel("Laterality")
+                    ChoiceRow(
+                        options = listOf("" to "-", "L" to "L", "R" to "R", "U" to "U"),
+                        selected = patient.laterality,
+                        onSelect = { onPatientChange(patient.copy(laterality = it)) },
+                    )
+                    if (!pacsConfigured) {
+                        StatusBanner(
+                            text = "Configure Remote DICOM in Settings before sending captures.",
+                            tone = StatusTone.Warn,
+                        )
+                        QuietOutlinedButton(
+                            text = "Open Settings",
+                            onClick = onOpenSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    ForestButton(
+                        text = "Continue with this patient",
+                        onClick = onContinueManual,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
-            DicomTextField(
-                value = patient.patientName,
-                onValueChange = { onPatientChange(patient.copy(patientName = it)) },
-                label = "Patient Name * (FAMILY^GIVEN)",
-            )
-            DicomTextField(
-                value = patient.birthDate,
-                onValueChange = {
-                    onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
-                },
-                label = "Birth date (YYYYMMDD)",
-            )
-            SectionLabel("Sex")
-            ChoiceRow(
-                options = listOf("" to "-", "M" to "M", "F" to "F", "O" to "O"),
-                selected = patient.sex,
-                onSelect = { onPatientChange(patient.copy(sex = it)) },
-            )
-            DicomTextField(
-                value = patient.accessionNumber,
-                onValueChange = { onPatientChange(patient.copy(accessionNumber = it)) },
-                label = "Accession (optional)",
-            )
-            DicomTextField(
-                value = patient.studyDescription,
-                onValueChange = { onPatientChange(patient.copy(studyDescription = it)) },
-                label = "Study description (optional)",
-            )
-            DicomTextField(
-                value = patient.bodyPartExamined,
-                onValueChange = { onPatientChange(patient.copy(bodyPartExamined = it.uppercase())) },
-                label = "Body part (e.g. HAND, FOOT)",
-            )
-            SectionLabel("Laterality")
-            ChoiceRow(
-                options = listOf("" to "-", "L" to "L", "R" to "R", "U" to "U"),
-                selected = patient.laterality,
-                onSelect = { onPatientChange(patient.copy(laterality = it)) },
-            )
-            ForestButton(
-                text = "Continue with this patient",
-                onClick = onContinueManual,
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
 
         if (pendingCount > 0) {

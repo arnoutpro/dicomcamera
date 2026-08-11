@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -117,6 +118,60 @@ fun SoftPanel(
             .padding(contentPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
+    )
+}
+
+/**
+ * Two-option mode switch (e.g. Worklist / Manual). Not a pill cluster — full-width segments.
+ */
+@Composable
+fun SegmentedChoice(
+    leftLabel: String,
+    rightLabel: String,
+    leftSelected: Boolean,
+    onLeft: () -> Unit,
+    onRight: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(DicomShapes.Control)
+            .border(1.dp, DicomColors.Hairline, DicomShapes.Control),
+    ) {
+        SegmentCell(
+            label = leftLabel,
+            selected = leftSelected,
+            onClick = onLeft,
+            modifier = Modifier.weight(1f),
+        )
+        SegmentCell(
+            label = rightLabel,
+            selected = !leftSelected,
+            onClick = onRight,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun SegmentCell(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bg = if (selected) DicomColors.Forest else DicomColors.White
+    val fg = if (selected) DicomColors.White else DicomColors.Ink
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = fg,
+        textAlign = TextAlign.Center,
+        modifier = modifier
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 8.dp),
     )
 }
 

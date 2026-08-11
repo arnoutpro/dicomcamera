@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import nl.dicomcamera.app.BuildConfig
 import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
@@ -175,6 +176,24 @@ private fun SettingsHub(
 
         if (connectivityStatus.isNotBlank()) {
             StatusBanner(text = connectivityStatus, tone = connectivityTone(connectivityStatus))
+        }
+
+        SoftPanel {
+            SectionLabel("About")
+            Text(
+                "DICOM Camera",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            Text(
+                BuildConfig.FLAVOR.replaceFirstChar { it.uppercase() } + " build",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate500,
+            )
         }
     }
 }

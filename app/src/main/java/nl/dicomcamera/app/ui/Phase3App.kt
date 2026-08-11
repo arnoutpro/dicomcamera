@@ -71,6 +71,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nl.dicomcamera.app.demo.ArchivedPatientStore
 import nl.dicomcamera.app.demo.DemoPatients
 import nl.dicomcamera.app.demo.LocalArchiveStore
 import nl.dicomcamera.app.diagnostics.DiagnosticLog
@@ -125,9 +126,7 @@ private enum class Destination {
     Worklist,
     Archive,
     Settings,
-    Capture,
-    Sending,
-    Result,
+    Session,
     Pending,
 }
 
@@ -163,19 +162,14 @@ fun Phase3App() {
     val localArchive = remember {
         LocalArchiveStore(File(context.filesDir, "local-archive"), staging)
     }
+    val archivedStore = remember {
+        ArchivedPatientStore(File(context.filesDir, "archived-patients"))
+    }
     val audit = remember { AuditLog(File(context.filesDir, "audit/audit.csv")) }
     val diagnosticLog = remember {
         DiagnosticLog(File(context.filesDir, "logs/diagnostic.log"))
     }
     val batchSender = remember { SessionBatchSender(staging, pendingQueue, audit) }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { staging.purgeOrphans() }
-    }
-
-    LaunchedEffect(pacsSettings.loggingEnabled) {
-        diagnosticLog.setEnabled(pacsSettings.loggingEnabled)
-    }
 
     var destination by remember { mutableStateOf(Destination.Worklist) }
     var lastMainTab by remember { mutableStateOf(MainTab.Worklist) }
@@ -189,7 +183,22 @@ fun Phase3App() {
     var sendProgress by remember { mutableStateOf("") }
     var pendingItems by remember { mutableStateOf(pendingQueue.list()) }
     var readyStudies by remember { mutableStateOf(localArchive.list()) }
+    var archivedRecords by remember { mutableStateOf(archivedStore.list()) }
+    var sessionStep by remember { mutableStateOf(SessionStep.Setup) }
+    var worklistHint by remember { mutableStateOf<String?>(null) }
     var logUiTick by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            staging.purgeOrphans()
+            archivedStore.purgeExpired()
+        }
+        archivedRecords = archivedStore.list()
+    }
+
+    LaunchedEffect(pacsSettings.loggingEnabled) {
+        diagnosticLog.setEnabled(pacsSettings.loggingEnabled)
+    }
 
     val downloadLogLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -227,6 +236,7 @@ fun Phase3App() {
 
     fun refreshArchive() {
         readyStudies = localArchive.list()
+        archivedRecords = archivedStore.list()
     }
 
     fun startNewSession(selection: ExamSelection) {
@@ -235,7 +245,11 @@ fun Phase3App() {
             studyInstanceUid = selection.context.studyInstanceUid
                 ?.takeIf { it.isNotBlank() }
                 ?: nl.dicomcamera.dicom.DicomUid.newUid(),
+            seriesInstanceUid = selection.context.seriesInstanceUid
+                ?.takeIf { it.isNotBlank() }
+                ?: nl.dicomcamera.dicom.DicomUid.newUid(),
         )
+        sessionStep = SessionStep.Setup
     }
 
     fun selectMainTab(tab: MainTab) {
@@ -246,8 +260,7 @@ fun Phase3App() {
 
     fun goBack() {
         destination = when (destination) {
-            Destination.Capture -> lastMainTab.toDestination()
-            Destination.Sending, Destination.Result, Destination.Pending -> lastMainTab.toDestination()
+            Destination.Session, Destination.Pending -> lastMainTab.toDestination()
             Destination.Worklist, Destination.Archive, Destination.Settings -> destination
         }
     }
@@ -257,9 +270,13 @@ fun Phase3App() {
         Destination.Worklist -> "Worklist"
         Destination.Archive -> "Archive"
         Destination.Settings -> settingsTitle
-        Destination.Capture -> "Session capture"
-        Destination.Sending -> "Sending"
-        Destination.Result -> "Result"
+        Destination.Session -> when (sessionStep) {
+            SessionStep.Setup -> "Patient"
+            SessionStep.Review -> "Review"
+            SessionStep.Markup -> "Mark up"
+            SessionStep.Archiving -> "Archiving"
+            SessionStep.Result -> "Archive result"
+        }
         Destination.Pending -> "Pending uploads"
     }
 
@@ -361,19 +378,29 @@ fun Phase3App() {
                     },
                     onWorklistSelected = { entry: WorklistEntry ->
                         val ctx = entry.toPatientStudyContext("Clinical photo/video session").copy(
-                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                            laterality = patient.laterality.takeIf { it.isNotBlank() },
+                            bodyPartExamined = null,
+                            laterality = null,
+                            patientBirthDate = null,
+                            patientSex = null,
+                            patientName = "",
                         )
                         startNewSession(ExamSelection(ctx, ExamSource.WORKLIST))
+                        worklistHint = listOfNotNull(
+                            entry.patientName.takeIf { it.isNotBlank() },
+                            entry.patientBirthDate,
+                            entry.patientSex,
+                            entry.accessionNumber?.let { "Acc $it" },
+                        ).joinToString(" · ")
+                        // Start with clear Name / Birthdate / Sex — user confirms on setup screen.
                         patient = ManualPatientForm(
                             patientId = entry.patientId,
-                            patientName = entry.patientName,
-                            birthDate = entry.patientBirthDate.orEmpty(),
-                            sex = entry.patientSex.orEmpty(),
+                            patientName = "",
+                            birthDate = "",
+                            sex = "",
                             accessionNumber = entry.accessionNumber.orEmpty(),
                             studyDescription = entry.studyDescription.orEmpty(),
-                            bodyPartExamined = patient.bodyPartExamined,
-                            laterality = patient.laterality,
+                            bodyPartExamined = "",
+                            laterality = "",
                         )
                         audit.record(
                             "select_worklist",
@@ -382,32 +409,40 @@ fun Phase3App() {
                             detail = entry.accessionNumber.orEmpty(),
                         )
                         statusNote = ""
-                        destination = Destination.Capture
+                        destination = Destination.Session
                     },
                     onContinueManual = {
+                        val id = patient.patientId.trim()
                         when {
-                            !patient.isValid() -> statusNote = "Patient ID and Name are required"
+                            id.isBlank() -> statusNote = "Patient ID is required"
                             else -> {
                                 statusNote = ""
+                                worklistHint = null
+                                val accession = patient.accessionNumber
+                                val studyDesc = patient.studyDescription
+                                patient = ManualPatientForm(
+                                    patientId = id,
+                                    patientName = "",
+                                    birthDate = "",
+                                    sex = "",
+                                    accessionNumber = accession,
+                                    studyDescription = studyDesc,
+                                )
                                 startNewSession(
                                     ExamSelection(
                                         context = PatientStudyContext(
-                                            patientId = patient.patientId.trim(),
-                                            patientName = patient.normalizedName(),
-                                            patientBirthDate = patient.birthDate.takeIf { it.length == 8 },
-                                            patientSex = patient.sex.takeIf { it.isNotBlank() },
-                                            accessionNumber = patient.accessionNumber.takeIf { it.isNotBlank() },
-                                            studyDescription = patient.studyDescription.takeIf { it.isNotBlank() },
+                                            patientId = id,
+                                            patientName = "",
+                                            accessionNumber = accession.takeIf { it.isNotBlank() },
+                                            studyDescription = studyDesc.takeIf { it.isNotBlank() },
                                             modality = pacsSettings.modality.ifBlank { "XC" },
                                             seriesDescription = "Clinical photo/video session",
-                                            bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
-                                            laterality = patient.laterality.takeIf { it.isNotBlank() },
                                         ),
                                         source = ExamSource.MANUAL,
                                     ),
                                 )
-                                audit.record("select_manual", patientId = patient.patientId)
-                                destination = Destination.Capture
+                                audit.record("select_manual", patientId = id)
+                                destination = Destination.Session
                             }
                         }
                     },
@@ -524,45 +559,34 @@ fun Phase3App() {
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         ForestButton(
-                                            text = "Send",
+                                            text = "Review & archive",
                                             onClick = {
-                                                if (!pacsSettings.isConfigured()) {
-                                                    statusNote = "Configure PACS in Settings to send"
-                                                    selectMainTab(MainTab.Settings)
+                                                val items = localArchive.toSessionItems(study)
+                                                if (items.isEmpty()) {
+                                                    statusNote = "No photos in this study"
                                                     return@ForestButton
                                                 }
-                                                destination = Destination.Sending
-                                                sendProgress = "Sending archive…"
-                                                scope.launch {
-                                                    val items = localArchive.toSessionItems(study)
-                                                    val tempSession = CaptureSession(
-                                                        studyInstanceUid = study.studyInstanceUid,
-                                                        seriesInstanceUid = study.seriesInstanceUid,
-                                                        items = items,
-                                                    )
-                                                    val outcome = withContext(Dispatchers.IO) {
-                                                        batchSender.sendAll(
-                                                            session = tempSession,
-                                                            examContext = study.toContext(),
-                                                            settings = pacsSettings,
-                                                            examSource = "LOCAL_ARCHIVE",
-                                                        ) { progress ->
-                                                            sendProgress = progress.message
-                                                        }
-                                                    }
-                                                    if (outcome.allSucceeded) {
-                                                        localArchive.markSentAndWipe(study.id)
-                                                        refreshArchive()
-                                                    } else {
-                                                        refreshPending()
-                                                    }
-                                                    resultSuccess = outcome.allSucceeded
-                                                    resultMessage = outcome.message
-                                                    destination = Destination.Result
-                                                }
+                                                localArchive.discard(study.id)
+                                                refreshArchive()
+                                                patient = ManualPatientForm(
+                                                    patientId = study.patientId,
+                                                    patientName = study.patientName,
+                                                    birthDate = study.birthDate.orEmpty(),
+                                                    sex = study.sex.orEmpty(),
+                                                    accessionNumber = study.accessionNumber.orEmpty(),
+                                                    studyDescription = study.studyDescription.orEmpty(),
+                                                )
+                                                worklistHint = null
+                                                exam = ExamSelection(study.toContext(), ExamSource.APPEND_EXISTING)
+                                                session = CaptureSession(
+                                                    studyInstanceUid = study.studyInstanceUid,
+                                                    seriesInstanceUid = study.seriesInstanceUid,
+                                                    items = items,
+                                                )
+                                                sessionStep = SessionStep.Review
+                                                destination = Destination.Session
                                             },
                                             compact = true,
-                                            enabled = pacsSettings.isConfigured(),
                                         )
                                         QuietOutlinedButton(
                                             text = "Discard",
@@ -583,7 +607,37 @@ fun Phase3App() {
                             }
                         }
 
-                        if (pacsSettings.isConfigured()) {
+                        
+                        ArchivedPatientsPanel(
+                            records = archivedRecords,
+                            onAddImaging = { record ->
+                                worklistHint = listOfNotNull(
+                                    record.patientName,
+                                    record.birthDate,
+                                    record.sex,
+                                    record.accessionNumber?.let { "Acc $it" },
+                                ).joinToString(" · ")
+                                patient = ManualPatientForm(
+                                    patientId = record.patientId,
+                                    patientName = "",
+                                    birthDate = "",
+                                    sex = "",
+                                    accessionNumber = record.accessionNumber.orEmpty(),
+                                    studyDescription = record.studyDescription.orEmpty(),
+                                    bodyPartExamined = "",
+                                    laterality = "",
+                                )
+                                startNewSession(
+                                    ExamSelection(
+                                        context = record.toContext(newSeries = true),
+                                        source = ExamSource.APPEND_EXISTING,
+                                    ),
+                                )
+                                destination = Destination.Session
+                            },
+                        )
+
+if (pacsSettings.isConfigured()) {
                             SoftPanel {
                                 SectionLabel("Append from PACS")
                             }
@@ -595,16 +649,26 @@ fun Phase3App() {
                                         bodyPartExamined = patient.bodyPartExamined.takeIf { it.isNotBlank() },
                                         laterality = patient.laterality.takeIf { it.isNotBlank() },
                                     )
-                                    startNewSession(ExamSelection(ctx, ExamSource.APPEND_EXISTING))
+                                    worklistHint = listOfNotNull(
+                                        entry.patientName.takeIf { it.isNotBlank() },
+                                        entry.patientBirthDate,
+                                        entry.patientSex,
+                                        entry.accessionNumber?.let { "Acc $it" },
+                                    ).joinToString(" · ")
+                                    startNewSession(ExamSelection(ctx.copy(
+                                        patientName = "",
+                                        patientBirthDate = null,
+                                        patientSex = null,
+                                        bodyPartExamined = null,
+                                        laterality = null,
+                                    ), ExamSource.APPEND_EXISTING))
                                     patient = ManualPatientForm(
                                         patientId = entry.patientId,
-                                        patientName = entry.patientName,
-                                        birthDate = entry.patientBirthDate.orEmpty(),
-                                        sex = entry.patientSex.orEmpty(),
+                                        patientName = "",
+                                        birthDate = "",
+                                        sex = "",
                                         accessionNumber = entry.accessionNumber.orEmpty(),
                                         studyDescription = entry.studyDescription.orEmpty(),
-                                        bodyPartExamined = patient.bodyPartExamined,
-                                        laterality = patient.laterality,
                                     )
                                     audit.record(
                                         "select_append_study",
@@ -612,7 +676,7 @@ fun Phase3App() {
                                         studyUid = entry.studyInstanceUid,
                                         detail = entry.accessionNumber.orEmpty(),
                                     )
-                                    destination = Destination.Capture
+                                    destination = Destination.Session
                                 },
                             )
                         } else {
@@ -629,100 +693,43 @@ fun Phase3App() {
                     }
                 }
 
-                Destination.Capture -> CaptureSessionScreen(
-                    patientBanner = exam?.banner ?: "${patient.patientId} · ${patient.patientName}",
+                Destination.Session -> SessionWorkflow(
+                    step = sessionStep,
+                    onStepChange = { sessionStep = it },
+                    patient = patient,
+                    onPatientChange = { patient = it },
+                    exam = exam,
+                    onExamChange = { exam = it },
                     session = session,
+                    onSessionChange = { session = it },
                     staging = staging,
-                    primaryActionLabel = if (pacsSettings.isConfigured()) {
-                        "Send to PACS"
-                    } else {
-                        "Save to Archive"
+                    batchSender = batchSender,
+                    archivedStore = archivedStore,
+                    localArchive = localArchive,
+                    diagnosticLog = diagnosticLog,
+                    audit = audit,
+                    pacsSettings = pacsSettings,
+                    worklistHint = worklistHint,
+                    onFinished = {
+                        session = CaptureSession()
+                        exam = null
+                        worklistHint = null
+                        selectMainTab(MainTab.Archive)
                     },
-                    onAddItem = { item -> session = session.add(item) },
-                    onDiscardItem = { id ->
-                        session = batchSender.discardItem(session, id)
-                    },
-                    onSendAll = {
-                        val currentExam = exam
-                        if (currentExam == null) {
-                            statusNote = "No exam selected"
-                            return@CaptureSessionScreen
-                        }
-                        if (session.pendingSendCount == 0) {
-                            statusNote = "Add at least one photo or video"
-                            return@CaptureSessionScreen
-                        }
-                        if (!pacsSettings.isConfigured()) {
-                            scope.launch {
-                                val outcome = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        localArchive.saveSession(session, currentExam.context)
-                                    }
-                                }
-                                outcome.onSuccess { ready ->
-                                    session = batchSender.discardSession(session)
-                                    refreshArchive()
-                                    audit.record(
-                                        "archive_local",
-                                        patientId = ready.patientId,
-                                        studyUid = ready.studyInstanceUid,
-                                        detail = "${ready.photoCount} photo(s)",
-                                    )
-                                    diagnosticLog.log("archive_local", ready.id)
-                                    statusNote = "Saved to Archive — ready to send"
-                                    selectMainTab(MainTab.Archive)
-                                }.onFailure { e ->
-                                    statusNote = "Archive failed: ${e.message}"
-                                }
-                            }
-                            return@CaptureSessionScreen
-                        }
-                        destination = Destination.Sending
-                        sendProgress = "Starting batch..."
-                        scope.launch {
-                            val outcome = withContext(Dispatchers.IO) {
-                                batchSender.sendAll(
-                                    session = session,
-                                    examContext = currentExam.context,
-                                    settings = pacsSettings,
-                                    examSource = currentExam.source.name,
-                                ) { progress ->
-                                    sendProgress = progress.message
-                                }
-                            }
-                            session = outcome.session
-                            refreshPending()
-                            resultSuccess = outcome.allSucceeded
-                            resultMessage = outcome.message
-                            if (outcome.allSucceeded) {
-                                session = CaptureSession(
-                                    studyInstanceUid = outcome.session.studyInstanceUid,
-                                    seriesInstanceUid = outcome.session.seriesInstanceUid,
-                                )
-                            }
-                            destination = Destination.Result
-                        }
-                    },
-                    onDiscardSession = {
+                    onCancelWorkflow = {
                         session = batchSender.discardSession(session)
+                        exam = null
+                        worklistHint = null
                         selectMainTab(lastMainTab)
                     },
-                )
-
-                Destination.Sending -> SendingScreen(progress = sendProgress)
-
-                Destination.Result -> ResultScreen(
-                    message = resultMessage,
-                    success = resultSuccess,
-                    pendingCount = pendingItems.size,
-                    remainingInSession = session.pendingSendCount,
-                    onDone = { selectMainTab(lastMainTab) },
-                    onBackToSession = { destination = Destination.Capture },
-                    onPending = {
-                        refreshPending()
-                        destination = Destination.Pending
+                    onOpenLog = {
+                        diagnosticLog.setEnabled(true)
+                        statusNote = "Logging enabled — download from Settings → Logging. Contact your PACS administrator if needed."
+                        selectMainTab(MainTab.Settings)
                     },
+                    onArchivedRefresh = { refreshArchive() },
                 )
+
 
                 Destination.Pending -> PendingScreen(
                     items = pendingItems,

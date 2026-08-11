@@ -70,11 +70,14 @@ fun BrandLogo(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // Black-square A-mark: keep as a rounded badge on light chrome.
         Image(
             painter = painterResource(R.drawable.brand_logo),
             contentDescription = "DICOM Camera",
-            modifier = Modifier.size(32.dp),
-            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop,
         )
         if (showWordmark) {
             Text(

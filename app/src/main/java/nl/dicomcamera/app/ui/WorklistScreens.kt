@@ -327,10 +327,6 @@ fun AppendStudyScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        ScreenTitle(
-            title = "Archive",
-            subtitle = "Find an existing study, then add clinical photo/video to it.",
-        )
         SoftPanel {
             SectionLabel("Query")
             DicomTextField(

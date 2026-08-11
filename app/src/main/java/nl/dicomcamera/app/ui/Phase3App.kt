@@ -83,7 +83,6 @@ import nl.dicomcamera.app.session.SessionItem
 import nl.dicomcamera.app.session.SessionItemStatus
 import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.settings.SettingsRepository
-import nl.dicomcamera.app.ui.components.BrandWordmark
 import nl.dicomcamera.app.ui.components.ChromeBottomBar
 import nl.dicomcamera.app.ui.components.ChromeTopBar
 import nl.dicomcamera.app.ui.components.DicomTextField
@@ -91,7 +90,6 @@ import nl.dicomcamera.app.ui.components.ForestButton
 import nl.dicomcamera.app.ui.components.MainTab
 import nl.dicomcamera.app.ui.components.MetaChip
 import nl.dicomcamera.app.ui.components.QuietOutlinedButton
-import nl.dicomcamera.app.ui.components.ScreenTitle
 import nl.dicomcamera.app.ui.components.SectionLabel
 import nl.dicomcamera.app.ui.components.SegmentedChoice
 import nl.dicomcamera.app.ui.components.SoftPanel
@@ -259,14 +257,8 @@ fun Phase3App() {
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ChromeTopBar(
+                branded = destination.isMainTab(),
                 title = title,
-                subtitle = when (destination) {
-                    Destination.Worklist -> "Modality worklist & manual"
-                    Destination.Archive -> "Find study to append"
-                    Destination.Settings -> "PACS & modality"
-                    Destination.Capture -> exam?.banner
-                    else -> null
-                },
                 navigationIcon = if (!destination.isMainTab()) {
                     {
                         IconButton(onClick = { goBack() }) {
@@ -498,10 +490,6 @@ fun Phase3App() {
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            ScreenTitle(
-                                title = "Archive",
-                                subtitle = "Query existing studies to append photos or video.",
-                            )
                             StatusBanner(
                                 text = "Configure PACS in Settings before querying the archive.",
                                 tone = StatusTone.Warn,
@@ -699,16 +687,6 @@ private fun WorklistTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        BrandWordmark(size = 22)
-        ScreenTitle(
-            title = if (mode == WorklistMode.Worklist) "Worklist" else "Manual",
-            subtitle = if (mode == WorklistMode.Worklist) {
-                "Scheduled patients from the modality worklist."
-            } else {
-                "HL7 ADT demographics query or enter patient details by hand."
-            },
-        )
-
         SegmentedChoice(
             leftLabel = "Worklist",
             rightLabel = "Manual",
@@ -1280,10 +1258,6 @@ private fun PendingScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ScreenTitle(
-            title = "Pending uploads",
-            subtitle = "Retry failed C-STORE jobs or discard local copies.",
-        )
         if (items.isEmpty()) {
             SoftPanel {
                 Text("No pending uploads.", style = MaterialTheme.typography.bodyMedium)

@@ -134,11 +134,6 @@ private fun SettingsHub(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        ScreenTitle(
-            title = "Settings",
-            subtitle = "Modality identity, PACS archive, EHR demographics, and diagnostics.",
-        )
-
         StatusBanner(
             text = if (draft.isConfigured()) {
                 "PACS ready — ${draft.remoteSummary()}"

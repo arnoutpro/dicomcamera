@@ -29,9 +29,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import nl.dicomcamera.app.BuildConfig
+import nl.dicomcamera.app.R
 import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
@@ -244,7 +246,7 @@ private fun SettingsHub(
         SoftPanel {
             SectionLabel("About")
             Text(
-                "DICOM Camera",
+                stringResource(R.string.brand_name),
                 style = MaterialTheme.typography.titleSmall,
             )
             Text(

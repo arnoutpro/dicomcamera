@@ -328,7 +328,9 @@ class SessionBatchSender(
     fun discardSession(session: CaptureSession): CaptureSession {
         session.items.forEach { item ->
             item.dicomFile?.let { staging.wipe(it) }
-            if (item.status != SessionItemStatus.STORED) {
+            // Always wipe raw if still present. STORED items should already be gone after ACK,
+            // but wipe failures can leave pixels — never skip cleanup on discard.
+            if (item.rawFile.exists()) {
                 staging.wipe(item.rawFile)
             }
         }

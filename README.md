@@ -11,10 +11,14 @@
 
 <p align="center">
   <a href="docs/compliance/DICOM_CONFORMANCE_STATEMENT.md">DICOM Conformance Statement</a> ·
+  <a href="DISCLAIMER.md">Disclaimer (lab only)</a> ·
+  <a href="LICENSE">Apache 2.0</a> ·
   <a href="docs/PRODUCT_PLAN.md">Product plan</a> ·
   <a href="docs/deploy/IT_DEPLOYMENT_GUIDE.md">IT deployment</a> ·
   <a href="branding/play-store/">Play Store assets</a>
 </p>
+
+> **Lab / pilot only — not for clinical use.** See [`DISCLAIMER.md`](DISCLAIMER.md).
 
 ---
 
@@ -62,7 +66,7 @@ Clinical photos still end up in insecure channels (chat apps, personal cameras, 
 ### Privacy by design
 - App-private staging only — **never** the system gallery  
 - Wipe local pixels after successful store  
-- Clear in-app About copy: intended purpose, AVG posture, MDR/DPIA pilot warning  
+- Clear lab-only banner + Settings → About (purpose, AVG, MDR/DPIA)  
 
 ---
 
@@ -198,5 +202,8 @@ This repository is prepared for a **public** audience: hospitals, PACS engineers
 
 ## License
 
-Application source licensing: see repository license when published.  
+Licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE).
+
+**Not for clinical use** until your organisation completes applicable regulatory and privacy steps. Read [`DISCLAIMER.md`](DISCLAIMER.md) before deploying or testing with any patient data.
+
 **Sansation** font: SIL Open Font License 1.1 (`docs/licenses/SIL-OFL-Sansation.txt`).

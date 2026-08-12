@@ -505,6 +505,27 @@ fun DicomTextField(
 }
 
 @Composable
+fun LabUseBanner(modifier: Modifier = Modifier) {
+    Text(
+        text = stringResource(R.string.lab_use_banner),
+        style = MaterialTheme.typography.labelMedium.copy(
+            color = DicomColors.GoldInk,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.15.sp,
+            textAlign = TextAlign.Center,
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .background(DicomColors.GoldSoft)
+            .border(BorderStroke(1.dp, DicomColors.Gold.copy(alpha = 0.35f)))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+    )
+}
+
+@Composable
 fun ChromeTopBar(
     /**
      * When true (main tabs), show brand logo only — bottom nav already names the screen.
@@ -514,35 +535,41 @@ fun ChromeTopBar(
     title: String = "",
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
+    showLabBanner: Boolean = true,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(DicomColors.Chrome)
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (branded) {
-            BrandLogo()
-            BrandProductLabel(modifier = Modifier.weight(1f))
-            actions()
-        } else {
-            if (navigationIcon != null) {
-                navigationIcon()
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DicomColors.Chrome)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (branded) {
+                BrandLogo()
+                BrandProductLabel(modifier = Modifier.weight(1f))
+                actions()
+            } else {
+                if (navigationIcon != null) {
+                    navigationIcon()
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        color = DicomColors.Ink,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                actions()
             }
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    color = DicomColors.Ink,
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            actions()
+        }
+        if (showLabBanner) {
+            LabUseBanner()
         }
     }
 }

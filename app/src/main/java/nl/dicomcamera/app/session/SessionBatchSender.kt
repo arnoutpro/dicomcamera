@@ -11,6 +11,7 @@ import nl.dicomcamera.dicom.PhotographicImageEncoder
 import nl.dicomcamera.dicom.SecureStaging
 import nl.dicomcamera.dicom.StoreResult
 import nl.dicomcamera.dicom.VideoPhotographicEncoder
+import nl.dicomcamera.dicom.WipeResult
 import nl.dicomcamera.app.settings.PacsSettings
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -178,14 +179,19 @@ class SessionBatchSender(
                             sopUid = storeResult.sopInstanceUid,
                             detail = "$examSource;${item.kind};attempts=$attempts",
                         )
-                        staging.wipe(dicomFile)
-                        staging.wipe(item.rawFile)
+                        val wipeOk = wipeAfterSuccessfulStore(
+                            dicomFile = dicomFile,
+                            rawFile = item.rawFile,
+                            patientId = encodeContext.patientId,
+                            studyUid = session.studyInstanceUid,
+                            sopUid = storeResult.sopInstanceUid,
+                        )
                         working = working.update(item.id) {
                             it.copy(
                                 status = SessionItemStatus.STORED,
                                 dicomFile = null,
                                 sopInstanceUid = storeResult.sopInstanceUid,
-                                error = null,
+                                error = if (wipeOk) null else "Stored on PACS; local wipe failed — will retry on next launch",
                             )
                         }
                         successCount++
@@ -195,7 +201,11 @@ class SessionBatchSender(
                                 total = toSend.size,
                                 itemId = item.id,
                                 status = SessionItemStatus.STORED,
-                                message = "Stored ${item.label}",
+                                message = if (wipeOk) {
+                                    "Stored ${item.label}"
+                                } else {
+                                    "Stored ${item.label} (local wipe incomplete)"
+                                },
                             ),
                         )
                     }
@@ -323,5 +333,37 @@ class SessionBatchSender(
             }
         }
         return session.clear()
+    }
+
+    /**
+     * After PACS ACK, securely wipe local DICOM + raw. Failures are audited and retried once;
+     * leftover files remain under staging for [SecureStaging.purgeOrphans] on next launch.
+     */
+    private fun wipeAfterSuccessfulStore(
+        dicomFile: File,
+        rawFile: File,
+        patientId: String,
+        studyUid: String,
+        sopUid: String,
+    ): Boolean {
+        var ok = true
+        listOf(dicomFile, rawFile).forEach { file ->
+            if (!file.exists()) return@forEach
+            when (val result = staging.wipeAfterAck(file)) {
+                is WipeResult.Wiped, is WipeResult.AlreadyGone -> Unit
+                is WipeResult.Failed -> {
+                    ok = false
+                    Log.e(TAG, "wipe after ACK failed for ${file.name}: ${result.message}")
+                    audit.record(
+                        action = "wipe_failed_after_store",
+                        patientId = patientId,
+                        studyUid = studyUid,
+                        sopUid = sopUid,
+                        detail = "${file.name}:${result.message}",
+                    )
+                }
+            }
+        }
+        return ok
     }
 }

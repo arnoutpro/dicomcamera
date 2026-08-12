@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -472,6 +473,7 @@ fun DicomTextField(
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
     enabled: Boolean = true,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     OutlinedTextField(
         value = value,
@@ -488,6 +490,7 @@ fun DicomTextField(
         modifier = modifier.fillMaxWidth(),
         singleLine = singleLine,
         enabled = enabled,
+        visualTransformation = visualTransformation,
         shape = DicomShapes.Control,
         textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
         colors = OutlinedTextFieldDefaults.colors(

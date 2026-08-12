@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- SecureStaging root + camera subdirectory -->
+    <!-- SecureStaging root + camera subdirectory (app-private filesDir) -->
     <files-path name="staging" path="staging/" />
     <files-path name="capture" path="capture/" />
-    <cache-path name="cache" path="." />
-    <!-- ColorOS-friendly FileProvider fallback (not internal filesDir) -->
-    <external-files-path name="ext_pictures" path="Pictures/" />
+    <!-- ColorOS-friendly FileProvider capture target (app-private external files) -->
     <external-files-path name="ext_pictures_capture" path="Pictures/capture/" />
-    <external-files-path name="ext_movies" path="Movies/" />
 </paths>

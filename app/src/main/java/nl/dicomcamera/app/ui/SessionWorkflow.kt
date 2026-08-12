@@ -93,7 +93,8 @@ fun SessionWorkflow(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var pendingCapture by remember { mutableStateOf<SystemCameraCapture.Pending?>(null) }
+    val pendingCaptureState = remember { mutableStateOf<SystemCameraCapture.Pending?>(null) }
+    var pendingCapture by pendingCaptureState
     var pendingPermissionPhoto by remember { mutableStateOf<Boolean?>(null) }
     var markupItem by remember { mutableStateOf<SessionItem?>(null) }
     var previewItem by remember { mutableStateOf<SessionItem?>(null) }
@@ -191,7 +192,11 @@ fun SessionWorkflow(
         onStepChange(SessionStep.Review)
     }
 
-    val systemCamera = rememberLauncherForActivityResult(SystemCameraContract()) { result ->
+    val systemCamera = rememberLauncherForActivityResult(
+        remember {
+            SystemCameraContract(onPendingReady = { updated -> pendingCaptureState.value = updated })
+        },
+    ) { result ->
         val pending = pendingCapture
         pendingCapture = null
         if (pending == null) return@rememberLauncherForActivityResult

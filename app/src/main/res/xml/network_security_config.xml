@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Staging / release-oriented default: block cleartext HTTP(S) to EHR/DICOMweb.
+     DIMSE over plain TCP is unaffected. Dev flavor overrides to allow lab Orthanc HTTP. -->
 <network-security-config>
-    <!-- Dev/lab: Orthanc on host/emulator often uses cleartext DIMSE; HTTP UI is separate. -->
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
 </network-security-config>

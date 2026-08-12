@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.core.content.FileProvider
 import nl.dicomcamera.dicom.SecureStaging
+import nl.dicomcamera.dicom.WipeResult
 import java.io.File
 import java.io.FileOutputStream
 
@@ -35,6 +36,8 @@ object SystemCameraCapture {
         val stagingFile: File,
         val outputUri: Uri,
         val outputFile: File,
+        /** Package that received temporary URI grants for EXTRA_OUTPUT. */
+        val cameraPackage: String? = null,
         val launchedAtEpochMs: Long = System.currentTimeMillis(),
     )
 
@@ -99,7 +102,11 @@ object SystemCameraCapture {
         )
     }
 
-    fun buildIntent(context: Context, pending: Pending): Intent {
+    /**
+     * Builds the camera Intent and returns an updated [Pending] that records which
+     * package received URI grants (so we can revoke them after capture).
+     */
+    fun buildCapture(context: Context, pending: Pending): Pair<Intent, Pending> {
         val intent = baseIntent(pending.photo)
 
         preferOemCameraPackage(context)?.let { pkg ->
@@ -117,25 +124,23 @@ object SystemCameraCapture {
         )
         val flags =
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        val query = Intent(intent.action)
-        val targets = context.packageManager.queryIntentActivities(
-            query,
-            PackageManager.MATCH_DEFAULT_ONLY,
-        )
-        val packages = buildSet {
-            preferOemCameraPackage(context)?.let { add(it) }
-            targets.forEach { add(it.activityInfo.packageName) }
-            intent.`package`?.let { add(it) }
-        }
-        for (pkg in packages) {
-            runCatching { context.grantUriPermission(pkg, pending.outputUri, flags) }
+
+        // Grant only to the camera package that will handle this Intent — not every
+        // IMAGE_CAPTURE / VIDEO_CAPTURE handler on the device.
+        val targetPackage = intent.`package`
+            ?: intent.resolveActivity(context.packageManager)?.packageName
+        if (targetPackage != null) {
+            runCatching { context.grantUriPermission(targetPackage, pending.outputUri, flags) }
         }
 
         if (!pending.photo) {
             intent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1)
         }
-        return intent
+        return intent to pending.copy(cameraPackage = targetPackage)
     }
+
+    /** @deprecated Prefer [buildCapture] so URI grants can be revoked. */
+    fun buildIntent(context: Context, pending: Pending): Intent = buildCapture(context, pending).first
 
     fun finalizeCapture(context: Context, pending: Pending, resultData: Intent?): FinalizeInfo {
         data class Candidate(val label: String, val tryLoad: () -> Boolean)
@@ -177,7 +182,7 @@ object SystemCameraCapture {
             if (pending.photo && !isFullResEnough(meta.width, meta.height, pending.stagingFile.length())) {
                 continue
             }
-            wipeOutput(pending)
+            wipeOutput(context, pending)
             return FinalizeInfo(
                 ok = true,
                 width = meta.width,
@@ -193,7 +198,7 @@ object SystemCameraCapture {
             @Suppress("DEPRECATION")
             val thumb = resultData?.extras?.getParcelable<android.graphics.Bitmap>("data")
             if (thumb != null) {
-                wipeOutput(pending)
+                wipeOutput(context, pending)
                 return FinalizeInfo(
                     ok = false,
                     width = thumb.width,
@@ -206,7 +211,7 @@ object SystemCameraCapture {
             }
         }
 
-        wipeOutput(pending)
+        wipeOutput(context, pending)
         return FinalizeInfo(
             ok = false,
             source = "none",
@@ -216,16 +221,56 @@ object SystemCameraCapture {
 
     fun abandon(context: Context, pending: Pending?) {
         if (pending == null) return
-        wipeOutput(pending)
+        wipeOutput(context, pending)
         runCatching {
-            if (pending.stagingFile.exists()) pending.stagingFile.delete()
+            if (pending.stagingFile.exists()) {
+                secureDelete(pending.stagingFile)
+            }
         }
     }
 
-    private fun wipeOutput(pending: Pending) {
-        runCatching {
-            if (pending.outputFile.exists()) pending.outputFile.delete()
+    /**
+     * Wipe leftover EXTRA_OUTPUT files under app-private Pictures/capture
+     * (crash / process kill between camera return and finalize).
+     */
+    fun purgeLeftoverOutputs(context: Context): Int {
+        val extDir = File(
+            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
+            "capture",
+        )
+        if (!extDir.isDirectory) return 0
+        var removed = 0
+        extDir.listFiles()?.filter { it.isFile }?.forEach { file ->
+            when (secureDelete(file)) {
+                is WipeResult.Wiped, is WipeResult.AlreadyGone -> removed++
+                is WipeResult.Failed -> if (file.delete()) removed++
+            }
         }
+        return removed
+    }
+
+    private fun wipeOutput(context: Context, pending: Pending) {
+        revokeGrants(context, pending)
+        runCatching {
+            if (pending.outputFile.exists()) {
+                secureDelete(pending.outputFile)
+            }
+        }
+    }
+
+    private fun secureDelete(file: File): WipeResult {
+        val parent = file.parentFile ?: return WipeResult.Failed("No parent for ${file.absolutePath}")
+        return SecureStaging(parent).wipe(file)
+    }
+
+    private fun revokeGrants(context: Context, pending: Pending) {
+        val pkg = pending.cameraPackage
+            ?: preferOemCameraPackage(context)
+            ?: baseIntent(pending.photo).resolveActivity(context.packageManager)?.packageName
+            ?: return
+        val flags =
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { context.revokeUriPermission(pkg, pending.outputUri, flags) }
     }
 
     private fun isFullResEnough(width: Int, height: Int, bytes: Long): Boolean {
@@ -288,13 +333,22 @@ object SystemCameraCapture {
     }
 }
 
-/** Launches the system camera; result includes the data Intent (needed on ColorOS). */
-class SystemCameraContract :
-    ActivityResultContract<SystemCameraCapture.Pending, SystemCameraContract.CameraResult>() {
+/**
+ * Launches the system camera; result includes the data Intent (needed on ColorOS).
+ *
+ * Input is a [SystemCameraCapture.Pending] that may be updated with the granted camera
+ * package via [onPendingReady] before the activity starts.
+ */
+class SystemCameraContract(
+    private val onPendingReady: (SystemCameraCapture.Pending) -> Unit = {},
+) : ActivityResultContract<SystemCameraCapture.Pending, SystemCameraContract.CameraResult>() {
     data class CameraResult(val ok: Boolean, val data: Intent?)
 
-    override fun createIntent(context: Context, input: SystemCameraCapture.Pending): Intent =
-        SystemCameraCapture.buildIntent(context, input)
+    override fun createIntent(context: Context, input: SystemCameraCapture.Pending): Intent {
+        val (intent, updated) = SystemCameraCapture.buildCapture(context, input)
+        onPendingReady(updated)
+        return intent
+    }
 
     override fun parseResult(resultCode: Int, intent: Intent?): CameraResult =
         CameraResult(ok = resultCode == Activity.RESULT_OK, data = intent)

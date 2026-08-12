@@ -199,7 +199,9 @@ fun Phase3App() {
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
+            settingsRepo.migrateLegacyTokens()
             staging.purgeOrphans()
+            nl.dicomcamera.app.capture.SystemCameraCapture.purgeLeftoverOutputs(context)
             archivedStore.purgeExpired()
             pendingQueue.purgeExpired()
         }

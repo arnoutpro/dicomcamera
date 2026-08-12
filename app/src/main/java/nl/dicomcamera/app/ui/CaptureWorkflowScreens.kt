@@ -56,6 +56,7 @@ import nl.dicomcamera.app.session.CaptureSession
 import nl.dicomcamera.app.session.ManualPatientForm
 import nl.dicomcamera.app.session.SessionItem
 import nl.dicomcamera.app.session.SessionItemStatus
+import nl.dicomcamera.app.ui.components.DicomDateField
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
 import nl.dicomcamera.app.ui.components.MetaChip
@@ -105,12 +106,10 @@ fun PatientSetupScreen(
                 onValueChange = { onPatientChange(patient.copy(patientName = it)) },
                 label = "Name * (FAMILY^GIVEN)",
             )
-            DicomTextField(
-                value = patient.birthDate,
-                onValueChange = {
-                    onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
-                },
-                label = "Birth date (YYYYMMDD)",
+            DicomDateField(
+                valueYyyymmdd = patient.birthDate,
+                onValueChange = { onPatientChange(patient.copy(birthDate = it)) },
+                label = "Birth date",
             )
             SectionLabel("Sex")
             WorkflowChoiceRow(

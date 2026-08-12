@@ -1,34 +1,11 @@
-# DICOM Conformance Statement — outline (Phase 0)
+# DICOM Conformance Statement — outline (historical)
 
-Formal statement will be published before external pilots. This outline tracks SOP classes we intend to claim.
+Phase 0–3 tracking outline. **Superseded** by the full technical statement:
 
-## Implementation
+→ [`DICOM_CONFORMANCE_STATEMENT.md`](DICOM_CONFORMANCE_STATEMENT.md) **v1.0**
 
-| Item | Value |
-|---|---|
-| Application | DICOM Camera (Android) |
-| Version | 0.4.x (Phase 3) |
-| AE Title | Configurable (default `DICOMCAM`) |
+Open production follow-ups (also listed in that statement’s Annex C):
 
-## Networking
-
-| Service | Role | Phase |
-|---|---|---|
-| Verification SOP Class | SCU | 0 |
-| Secondary Capture Image Storage | SCU (Storage) | 0 |
-| VL Photographic Image Storage | SCU (Storage) | 1 (preferred encoding) |
-| Basic Worklist Management (C-FIND) | SCU | 2 |
-| Study Root Query/Retrieve Information Model – FIND | SCU | 2 |
-| Video Photographic Image Storage | SCU (Storage) | 3 |
-| DICOMweb QIDO-RS / STOW-RS | SCU | 4 |
-
-## Transfer syntaxes
-
-- Explicit VR Little Endian
-- Implicit VR Little Endian
-- JPEG Baseline (Process 1) for VL Photographic
-- MPEG-4 AVC/H.264 High Profile / Level 4.1 (`MPEG4HP41`) for Video Photographic
-
-## UID generation
-
-Temporary UUID OID arc `2.25.*` — replace with organizational root before production.
+1. Replace temporary Implementation Class UID `2.25.*` with an organisational root  
+2. Record validation against a second commercial PACS/VNA  
+3. Optional: bump Implementation Version Name in encoders to match app release

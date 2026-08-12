@@ -249,7 +249,7 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 - Android Managed Configurations (no manual AE typing for end users)
 - IHE SWF modality actor checklist; optional WIC path documented
 - ATNA-style audit export (syslog/TLS or file for SIEM)
-- Draft **DICOM Conformance Statement** + deployment guide for IT
+- Draft **DICOM Conformance Statement** + deployment guide for IT → **v1.0 technical statement** in `docs/compliance/DICOM_CONFORMANCE_STATEMENT.md`
 
 **Exit criteria:** Verified against ≥2 PACS products (e.g. Orthanc + one commercial/VNA); IT deploy doc complete.
 

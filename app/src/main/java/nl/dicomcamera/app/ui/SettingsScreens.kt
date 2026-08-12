@@ -260,6 +260,46 @@ private fun SettingsHub(
                 color = DicomColors.Slate500,
             )
         }
+
+        SoftPanel {
+            SectionLabel(stringResource(R.string.about_purpose_title))
+            Text(
+                stringResource(R.string.about_purpose_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
+
+        SoftPanel {
+            SectionLabel(stringResource(R.string.about_privacy_title))
+            Text(
+                stringResource(R.string.about_privacy_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
+
+        SoftPanel {
+            SectionLabel(stringResource(R.string.about_compliance_title))
+            StatusBanner(
+                text = "Not CE-marked / not DPIA-signed — lab & pilot prep only",
+                tone = StatusTone.Warn,
+            )
+            Text(
+                stringResource(R.string.about_compliance_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
+
+        SoftPanel {
+            SectionLabel(stringResource(R.string.about_roles_title))
+            Text(
+                stringResource(R.string.about_roles_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
     }
 }
 

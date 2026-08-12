@@ -279,6 +279,12 @@ fun Phase3App() {
         pendingItems = pendingQueue.list()
     }
 
+    fun clearWorklistSelection() {
+        exam = null
+        worklistHint = null
+        patient = ManualPatientForm()
+    }
+
     fun startNewSession(selection: ExamSelection) {
         exam = selection
         session = CaptureSession(
@@ -303,8 +309,7 @@ fun Phase3App() {
             if (sessionBackHandler?.invoke() == true) return
             // Leaving from Patient setup — discard ephemeral session work.
             session = batchSender.discardSession(session)
-            exam = null
-            worklistHint = null
+            clearWorklistSelection()
             sessionStep = SessionStep.Setup
             destination = lastMainTab.toDestination()
             return
@@ -843,24 +848,29 @@ if (pacsSettings.isConfigured()) {
                     worklistHint = worklistHint,
                     onFinished = {
                         session = CaptureSession()
-                        exam = null
-                        worklistHint = null
+                        clearWorklistSelection()
                         refreshArchive()
                         selectMainTab(MainTab.Archive)
                     },
                     onCancelWorkflow = {
                         session = batchSender.discardSession(session)
-                        exam = null
-                        worklistHint = null
+                        clearWorklistSelection()
                         selectMainTab(lastMainTab)
                     },
                     onOpenLog = {
+                        // Leaving the session after a store attempt — drop worklist selection.
+                        clearWorklistSelection()
+                        session = CaptureSession()
+                        sessionStep = SessionStep.Setup
                         diagnosticLog.setEnabled(true)
                         statusNote = "Logging enabled — download from Settings → Logging. Contact your PACS administrator if needed."
                         selectMainTab(MainTab.Settings)
                     },
                     onArchivedRefresh = { refreshArchive() },
                     onViewPending = {
+                        clearWorklistSelection()
+                        session = CaptureSession()
+                        sessionStep = SessionStep.Setup
                         refreshPending()
                         destination = Destination.Pending
                     },

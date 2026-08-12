@@ -191,7 +191,8 @@ Phases **0–5** are implemented in-repo (foundations → store → worklist/app
 
 This repository is prepared for a **public** audience: hospitals, PACS engineers, and Android developers interested in standards-based clinical imaging on mobile.
 
-- Open issues for bugs and integration questions  
+- See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report bugs and open PRs  
+- See [`SECURITY.md`](SECURITY.md) for vulnerability reporting (no PHI in public issues)  
 - Prefer standards (DICOM / FHIR / HL7 / IHE) over vendor-specific shortcuts  
 - Never commit real patient data or production credentials  
 

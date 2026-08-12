@@ -38,7 +38,7 @@ dependencies {
 
     // DICOMweb (QIDO-RS / STOW-RS)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.json:json:20240303")
+    implementation("org.json:json:20260719")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

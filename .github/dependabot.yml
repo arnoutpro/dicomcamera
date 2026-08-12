@@ -1,5 +1,9 @@
 # Dependabot — weekly bumps for Gradle + GitHub Actions
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates
+#
+# Labels omitted on purpose: Dependabot only applies labels that already
+# exist in the repo. Create e.g. `dependencies` / `gradle` in GitHub UI
+# first if you want them, then add a `labels:` list back here.
 
 version: 2
 updates:
@@ -9,9 +13,11 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 8
-    labels:
-      - "dependencies"
-      - "gradle"
+    # Skip majors (AGP 9, Kotlin 2.4, OkHttp 5, Gradle 9, …) — do those as
+    # a deliberate toolchain PR, not a Dependabot swarm.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       gradle-minor:
         update-types:
@@ -24,9 +30,6 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "github-actions"
     groups:
       actions:
         patterns:

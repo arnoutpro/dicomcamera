@@ -88,6 +88,7 @@ import nl.dicomcamera.app.settings.PacsSettings
 import nl.dicomcamera.app.settings.SettingsRepository
 import nl.dicomcamera.app.ui.components.ChromeBottomBar
 import nl.dicomcamera.app.ui.components.ChromeTopBar
+import nl.dicomcamera.app.ui.components.DicomDateField
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
 import nl.dicomcamera.app.ui.components.MainTab
@@ -235,6 +236,34 @@ fun Phase3App() {
                     "Log downloaded"
                 },
                 onFailure = { "Download failed: ${it.message}" },
+            )
+            logUiTick++
+        }
+    }
+
+    val exportAtnaLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri: Uri? ->
+        if (uri == null) {
+            statusNote = "ATNA export cancelled"
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val exported = atnaExporter.exportFromCsv(File(context.filesDir, "audit/audit.csv"))
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        FileInputStream(exported.file).use { input -> input.copyTo(out) }
+                    } ?: error("Could not open destination")
+                    exported.eventCount
+                }
+            }
+            statusNote = outcome.fold(
+                onSuccess = { count ->
+                    diagnosticLog.log("atna_export", "events=$count")
+                    "ATNA export saved ($count events)"
+                },
+                onFailure = { "ATNA export failed: ${it.message}" },
             )
             logUiTick++
         }
@@ -576,14 +605,8 @@ fun Phase3App() {
                         logUiTick++
                     },
                     onExportAtna = {
-                        scope.launch {
-                            val exported = withContext(Dispatchers.IO) {
-                                atnaExporter.exportFromCsv(File(context.filesDir, "audit/audit.csv"))
-                            }
-                            statusNote = "ATNA export: ${exported.eventCount} events → ${exported.file.name}"
-                            diagnosticLog.log("atna_export", statusNote)
-                            logUiTick++
-                        }
+                        val name = "dicomcamera-atna-${Instant.now().toString().replace(':', '-')}.log"
+                        exportAtnaLauncher.launch(name)
                     },
                     onTitleChange = { settingsTitle = it },
                 )
@@ -591,6 +614,7 @@ fun Phase3App() {
                 Destination.Archive -> {
                     LaunchedEffect(Unit) { refreshArchive() }
                     val pendingGroups = remember(pendingItems) { pendingQueue.listGroupedByPatient() }
+                    val pendingCount = pendingItems.size
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -598,56 +622,56 @@ fun Phase3App() {
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        SoftPanel {
-                            SectionLabel("Waiting for PACS (4 hours)")
-                            Text(
-                                "Failed or unconfigured stores stay here for up to 4 hours. Resend is manual — nothing is sent automatically.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = DicomColors.Slate700,
-                            )
-                            if (pendingGroups.isEmpty()) {
-                                Text(
-                                    "No pending PACS uploads.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = DicomColors.Slate500,
+                        if (pendingCount > 0) {
+                            SoftPanel {
+                                StatusBanner(
+                                    text = "$pendingCount instance(s) waiting to send to PACS",
+                                    tone = StatusTone.Warn,
                                 )
-                            }
-                            pendingGroups.forEach { group ->
-                                SoftPanel {
+                                Text(
+                                    "Failed or queued stores stay for up to 4 hours. Open Pending uploads to resend or discard — nothing sends automatically.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DicomColors.Slate700,
+                                )
+                                ForestButton(
+                                    text = "Open Pending uploads ($pendingCount)",
+                                    onClick = {
+                                        refreshPending()
+                                        destination = Destination.Pending
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                pendingGroups.take(5).forEach { group ->
                                     Text(
-                                        "${group.patientId} · ${formatPersonNameForDisplay(group.patientName)}",
-                                        style = MaterialTheme.typography.titleSmall,
-                                    )
-                                    Text(
-                                        "${group.instanceCount} instance(s) · ${group.latestError}",
+                                        "• ${group.patientId} · ${formatPersonNameForDisplay(group.patientName)} · ${group.instanceCount} file(s)",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = DicomColors.Slate700,
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        ForestButton(
-                                            text = "Resend…",
-                                            onClick = {
-                                                refreshPending()
-                                                destination = Destination.Pending
-                                            },
-                                            compact = true,
-                                        )
-                                        QuietOutlinedButton(
-                                            text = "Discard",
-                                            onClick = {
-                                                pendingQueue.discardPatient(
-                                                    group.patientId,
-                                                    group.studyInstanceUid,
-                                                )
-                                                refreshPending()
-                                                diagnosticLog.log(
-                                                    "pending_discard_patient",
-                                                    "${group.patientId} ${group.studyInstanceUid}",
-                                                )
-                                            },
-                                        )
-                                    }
                                 }
+                                if (pendingGroups.size > 5) {
+                                    Text(
+                                        "…and ${pendingGroups.size - 5} more patient group(s)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = DicomColors.Slate500,
+                                    )
+                                }
+                            }
+                        } else {
+                            SoftPanel {
+                                SectionLabel("Pending uploads")
+                                Text(
+                                    "Nothing waiting for PACS right now.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DicomColors.Slate500,
+                                )
+                                QuietOutlinedButton(
+                                    text = "Open Pending uploads",
+                                    onClick = {
+                                        refreshPending()
+                                        destination = Destination.Pending
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
 
@@ -1116,12 +1140,10 @@ private fun WorklistTab(
                         onValueChange = { onPatientChange(patient.copy(patientName = it)) },
                         label = "Patient Name * (FAMILY^GIVEN)",
                     )
-                    DicomTextField(
-                        value = patient.birthDate,
-                        onValueChange = {
-                            onPatientChange(patient.copy(birthDate = it.filter { ch -> ch.isDigit() }.take(8)))
-                        },
-                        label = "Birth date (YYYYMMDD)",
+                    DicomDateField(
+                        valueYyyymmdd = patient.birthDate,
+                        onValueChange = { onPatientChange(patient.copy(birthDate = it)) },
+                        label = "Birth date",
                     )
                     SectionLabel("Sex")
                     ChoiceRow(

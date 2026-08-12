@@ -854,6 +854,11 @@ private fun LoggingSection(
                 onClick = onExportAtna,
                 modifier = Modifier.fillMaxWidth(),
             )
+            Text(
+                "Export opens the system save dialog (Files / Drive / email). A local copy is also kept under app storage for MDM sync.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate500,
+            )
             if (connectivityStatus.isNotBlank() && connectivityStatus.contains("ATNA", ignoreCase = true)) {
                 StatusBanner(text = connectivityStatus, tone = StatusTone.Info)
             }

@@ -10,6 +10,35 @@ services:
       - ./orthanc-storage:/var/lib/orthanc/db
     restart: unless-stopped
 
-  # Lightweight MWL SCP for Phase 2 prep (dcm4chee-arc optional later).
-  # For Phase 0, C-ECHO/C-STORE against Orthanc is enough.
-  # Uncomment when ready to exercise MWL locally with a dedicated tool.
+  # HAPI FHIR R4 — FHIR Patient lookup demo (Phase 5)
+  fhir:
+    image: hapiproject/hapi:latest
+    container_name: dicomcamera-fhir
+    ports:
+      - "8080:8080"
+    environment:
+      hapi.fhir.fhir_version: R4
+      hapi.fhir.reuse_cached_search_results_millis: "-1"
+    restart: unless-stopped
+
+  # Seed FHIR patients after HAPI is healthy
+  fhir-seed:
+    image: python:3.12-alpine
+    container_name: dicomcamera-fhir-seed
+    depends_on:
+      - fhir
+    volumes:
+      - ./fhir:/seed:ro
+    working_dir: /seed
+    environment:
+      FHIR_BASE_URL: http://fhir:8080/fhir
+    entrypoint: ["/bin/sh", "/seed/seed.sh"]
+    restart: "no"
+
+  # HL7 v2 demographics HTTPS façade mock (no MLLP)
+  hl7-facade:
+    build: ./hl7-facade
+    container_name: dicomcamera-hl7
+    ports:
+      - "8090:8090"
+    restart: unless-stopped

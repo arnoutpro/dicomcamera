@@ -35,8 +35,26 @@ Restrictions schema: `app/src/main/res/xml/app_restrictions.xml`
 | `pacs_calling_aet` | `DICOMCAM` |
 | `pacs_use_tls` | `true` |
 | `pacs_dicomweb_url` | `https://pacs.hospital.local/dicom-web` |
+| `fhir_enabled` | `true` |
+| `fhir_base_url` | `https://fhir.hospital.local/fhir` |
+| `fhir_bearer_token` | (optional) |
+| `hl7_enabled` | `true` |
+| `hl7_base_url` | `https://ehr-gw.hospital.local/hl7` |
+| `hl7_bearer_token` | (optional) |
+| `identity_lookup_mode` | `FHIR_THEN_HL7` / `HL7_THEN_FHIR` / `FHIR_ONLY` / `HL7_ONLY` |
 
 When restrictions are present, the app treats settings as **MDM-managed** (UI read-only).
+
+## EHR identity (lab)
+
+Local harnesses (HAPI FHIR + HL7 façade mock): see `lab/README.md`.
+
+| App setting | Emulator | Physical device on LAN |
+|---|---|---|
+| FHIR base URL | `http://10.0.2.2:8080/fhir` | `http://<lab-host>:8080/fhir` |
+| HL7 base URL | `http://10.0.2.2:8090` | `http://<lab-host>:8090` |
+
+Sample IDs: FHIR `999888777`, HL7 `123456789`.
 
 ## Flavors
 
@@ -56,6 +74,7 @@ When restrictions are present, the app treats settings as **MDM-managed** (UI re
 3. Append via Study find / QIDO keeps Study Instance UID
 4. After success, device staging folder empty
 5. Forced failure → pending queue → retry succeeds
+6. Manual Patient ID → Look up in EHR (FHIR and/or HL7) → demographics stamped on stored DICOM
 
 ## Second PACS
 

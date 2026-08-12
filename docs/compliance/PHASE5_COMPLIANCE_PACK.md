@@ -6,7 +6,7 @@ Living checklist for pilot readiness. Complete with counsel / privacy officer / 
 |---|---|---|
 | Intended purpose (MDR) | [intended-purpose-mdr-draft.md](intended-purpose-mdr-draft.md) | Draft |
 | DPIA / GEB outline | [dpia-geb-outline.md](dpia-geb-outline.md) | Outline — extend for EHR lookup |
-| DICOM Conformance Statement | [DICOM_CONFORMANCE_STATEMENT_DRAFT.md](DICOM_CONFORMANCE_STATEMENT_DRAFT.md) | Draft |
+| DICOM Conformance Statement | [DICOM_CONFORMANCE_STATEMENT.md](DICOM_CONFORMANCE_STATEMENT.md) | **v1.0 technical** (PS3.2-style); Annex C notes UID + multi-PACS follow-ups |
 | Verwerkersovereenkomst template | [verwerkersovereenkomst-template.md](verwerkersovereenkomst-template.md) | Template |
 | NEN 7510 questionnaire answers | [nen-7510-questionnaire.md](nen-7510-questionnaire.md) | Draft answers |
 | SBOM / release evidence | [sbom-and-test-evidence.md](sbom-and-test-evidence.md) | Process note |

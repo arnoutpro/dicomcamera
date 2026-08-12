@@ -12,8 +12,8 @@ android {
         applicationId = "nl.dicomcamera.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.6.8-chrome-split"
+        versionCode = 18
+        versionName = "0.6.9-lab-disclaimer"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }

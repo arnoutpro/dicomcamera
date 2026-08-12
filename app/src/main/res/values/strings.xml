@@ -2,4 +2,16 @@
 <resources>
     <string name="app_name">Arnout.pro DICOM Camera</string>
     <string name="brand_name">Arnout.pro DICOM Camera</string>
+
+    <string name="about_purpose_title">Intended purpose</string>
+    <string name="about_purpose_body">Clinical photo and video documentation for healthcare professionals: bind media to the correct patient/order, encode as DICOM, and send to the hospital PACS. Not for diagnosis, triage, or long-term storage on this device.</string>
+
+    <string name="about_privacy_title">Privacy (AVG / GDPR)</string>
+    <string name="about_privacy_body">Health data stays under the zorginstelling. Captures use app-private staging only, are wiped after a successful PACS acknowledgement, and are never written to the system gallery. Prefer worklist or EHR lookup over typing demographics by hand. Audit logs keep technical metadata, not pixel data.</string>
+
+    <string name="about_compliance_title">MDR, DPIA and pilots</string>
+    <string name="about_compliance_body">EU MDR classification and a signed DPIA/GEB are still required before real-patient use — drafts live with the product team / hospital privacy officer. This build is for lab and controlled pilot preparation. A verwerkersovereenkomst and NEN 7510 evidence must be agreed with each zorginstelling.</string>
+
+    <string name="about_roles_title">Roles</string>
+    <string name="about_roles_body">Typically the zorginstelling is verwerkingsverantwoordelijke (controller). This app processes data on-device under their instruction; PACS/EHR remain the systems of record.</string>
 </resources>

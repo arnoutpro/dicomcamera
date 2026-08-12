@@ -1019,10 +1019,6 @@ private fun WorklistTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        StatusBanner(
-            text = "Photos/videos are wiped after successful PACS store — not kept on this device.",
-            tone = StatusTone.Info,
-        )
         SegmentedChoice(
             leftLabel = "Worklist",
             rightLabel = "Manual",

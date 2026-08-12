@@ -282,7 +282,7 @@ private fun SettingsHub(
         SoftPanel {
             SectionLabel(stringResource(R.string.about_compliance_title))
             StatusBanner(
-                text = "Not CE-marked / not DPIA-signed — lab & pilot prep only",
+                text = "Not for clinical use — lab & pilot prep only (not CE-marked / not DPIA-signed)",
                 tone = StatusTone.Warn,
             )
             Text(

@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -73,7 +74,7 @@ fun BrandLogo(
         // Black-square A-mark: keep as a rounded badge on light chrome.
         Image(
             painter = painterResource(R.drawable.brand_logo),
-            contentDescription = "DICOM Camera",
+            contentDescription = stringResource(R.string.brand_name),
             modifier = Modifier
                 .size(36.dp)
                 .clip(RoundedCornerShape(8.dp)),
@@ -81,13 +82,13 @@ fun BrandLogo(
         )
         if (showWordmark) {
             Text(
-                text = "DICOM Camera",
-                style = MaterialTheme.typography.titleMedium.copy(
+                text = stringResource(R.string.brand_name),
+                style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.ExtraBold,
                     color = DicomColors.Ink,
                     letterSpacing = (-0.3).sp,
                 ),
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -100,7 +101,7 @@ fun BrandWordmark(
     size: Int = 18,
 ) {
     Text(
-        text = "DICOM Camera",
+        text = stringResource(R.string.brand_name),
         modifier = modifier,
         style = MaterialTheme.typography.titleMedium.copy(
             fontSize = size.sp,
@@ -108,6 +109,8 @@ fun BrandWordmark(
             brush = BrandGradient,
             letterSpacing = (-0.3).sp,
         ),
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 

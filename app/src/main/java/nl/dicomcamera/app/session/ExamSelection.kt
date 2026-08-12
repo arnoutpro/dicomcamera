@@ -1,5 +1,6 @@
 package nl.dicomcamera.app.session
 
+import nl.dicomcamera.app.ui.formatPersonNameForDisplay
 import nl.dicomcamera.dicom.PatientStudyContext
 
 enum class ExamSource {
@@ -20,6 +21,6 @@ data class ExamSelection(
                 ExamSource.APPEND_EXISTING -> "Append"
             }
             val acc = context.accessionNumber?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
-            return "$src · ${context.patientId} · ${context.patientName}$acc"
+            return "$src · ${context.patientId} · ${formatPersonNameForDisplay(context.patientName)}$acc"
         }
 }

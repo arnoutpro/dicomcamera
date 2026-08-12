@@ -615,7 +615,7 @@ fun Phase3App() {
                             pendingGroups.forEach { group ->
                                 SoftPanel {
                                     Text(
-                                        "${group.patientId} · ${group.patientName}",
+                                        "${group.patientId} · ${formatPersonNameForDisplay(group.patientName)}",
                                         style = MaterialTheme.typography.titleSmall,
                                     )
                                     Text(
@@ -668,7 +668,7 @@ fun Phase3App() {
                             readyStudies.forEach { study ->
                                 SoftPanel {
                                     Text(
-                                        "${study.patientId} · ${study.patientName}",
+                                        "${study.patientId} · ${formatPersonNameForDisplay(study.patientName)}",
                                         style = MaterialTheme.typography.titleSmall,
                                     )
                                     Text(
@@ -986,7 +986,7 @@ private fun WorklistTab(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         StatusBanner(
-            text = "Niet blijvend op dit apparaat — photos/videos are wiped after successful PACS store.",
+            text = "Photos/videos are wiped after successful PACS store — not kept on this device.",
             tone = StatusTone.Info,
         )
         SegmentedChoice(
@@ -1015,7 +1015,7 @@ private fun WorklistTab(
                     )
                     DemoPatients.entries.forEach { entry ->
                         ResultRow(
-                            title = "${entry.patientId} · ${entry.patientName}",
+                            title = "${entry.patientId} · ${formatPersonNameForDisplay(entry.patientName)}",
                             subtitle = listOfNotNull(
                                 entry.accessionNumber?.let { "Acc $it" },
                                 entry.scheduledStartDate,
@@ -1645,7 +1645,7 @@ private fun PendingScreen(
         groups.forEach { group ->
             SoftPanel {
                 Text(
-                    text = "${group.patientId} · ${group.patientName}",
+                    text = "${group.patientId} · ${formatPersonNameForDisplay(group.patientName)}",
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(

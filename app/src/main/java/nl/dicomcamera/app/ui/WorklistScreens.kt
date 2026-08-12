@@ -10,10 +10,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +35,7 @@ import kotlinx.coroutines.withContext
 import nl.dicomcamera.app.ui.components.DicomTextField
 import nl.dicomcamera.app.ui.components.ForestButton
 import nl.dicomcamera.app.ui.components.MetaChip
+import nl.dicomcamera.app.ui.components.QuietOutlinedButton
 import nl.dicomcamera.app.ui.components.ResultRow
 import nl.dicomcamera.app.ui.components.ScreenTitle
 import nl.dicomcamera.app.ui.components.SectionLabel
@@ -46,8 +52,12 @@ import nl.dicomcamera.dicom.StudyQuery
 import nl.dicomcamera.dicom.TransportMode
 import nl.dicomcamera.dicom.WorklistEntry
 import nl.dicomcamera.dicom.WorklistQuery
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 private enum class WorklistDateMode {
     Today,
@@ -61,6 +71,7 @@ private enum class WorklistSort {
     Accession,
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorklistScreen(
     endpoint: PacsEndpoint,
@@ -71,9 +82,8 @@ fun WorklistScreen(
 ) {
     val scope = rememberCoroutineScope()
     var dateMode by remember { mutableStateOf(WorklistDateMode.Today) }
-    var customDate by remember {
-        mutableStateOf(LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE))
-    }
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    var showDatePicker by remember { mutableStateOf(false) }
     var sort by remember { mutableStateOf(WorklistSort.Time) }
     var patientId by remember { mutableStateOf("") }
     var accession by remember { mutableStateOf("") }
@@ -90,18 +100,16 @@ fun WorklistScreen(
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
 
-    val today = remember { LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) }
+    val today = remember { LocalDate.now() }
+    val dateDisplayFormatter = remember {
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(Locale.getDefault())
+    }
     val sortedItems = remember(items, sort) { items.sortedWith(worklistComparator(sort)) }
 
     fun runQuery() {
         val scheduledDate = when (dateMode) {
-            WorklistDateMode.Today -> today
-            WorklistDateMode.Date -> customDate.trim()
-        }
-        if (dateMode == WorklistDateMode.Date && scheduledDate.length != 8) {
-            status = "Enter scheduled date as YYYYMMDD"
-            failed = true
-            return
+            WorklistDateMode.Today -> today.format(DateTimeFormatter.BASIC_ISO_DATE)
+            WorklistDateMode.Date -> selectedDate.format(DateTimeFormatter.BASIC_ISO_DATE)
         }
         loading = true
         failed = false
@@ -147,23 +155,23 @@ fun WorklistScreen(
             SectionLabel("Date")
             SegmentedChoice(
                 leftLabel = "Today",
-                rightLabel = "Date",
+                rightLabel = "Pick date",
                 leftSelected = dateMode == WorklistDateMode.Today,
                 onLeft = {
                     dateMode = WorklistDateMode.Today
-                    customDate = today
+                    selectedDate = today
                 },
                 onRight = { dateMode = WorklistDateMode.Date },
             )
             if (dateMode == WorklistDateMode.Date) {
-                DicomTextField(
-                    value = customDate,
-                    onValueChange = { customDate = it.filter { ch -> ch.isDigit() }.take(8) },
-                    label = "Scheduled date (YYYYMMDD)",
+                QuietOutlinedButton(
+                    text = "Scheduled: ${selectedDate.format(dateDisplayFormatter)}",
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             } else {
                 Text(
-                    "Scheduled date = $today",
+                    "Scheduled date = ${today.format(dateDisplayFormatter)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = DicomColors.Slate700,
                 )
@@ -221,7 +229,7 @@ fun WorklistScreen(
 
         sortedItems.forEach { entry ->
             ResultRow(
-                title = "${entry.patientId} · ${entry.patientName}",
+                title = "${entry.patientId} · ${formatPersonNameForDisplay(entry.patientName)}",
                 subtitle = listOfNotNull(
                     entry.accessionNumber?.let { "Acc $it" },
                     entry.modality,
@@ -235,6 +243,39 @@ fun WorklistScreen(
                     MetaChip(text = "Select", foreground = DicomColors.ForestMid)
                 },
             )
+        }
+    }
+
+    if (showDatePicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDate
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { millis ->
+                            selectedDate = Instant.ofEpochMilli(millis)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDate()
+                        }
+                        showDatePicker = false
+                    },
+                ) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            },
+        ) {
+            DatePicker(state = pickerState)
         }
     }
 

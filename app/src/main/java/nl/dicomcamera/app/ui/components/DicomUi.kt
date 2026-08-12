@@ -64,35 +64,37 @@ fun BrandLogo(
     showWordmark: Boolean = true,
 ) {
     if (!showWordmark) return
-    Column(
+    Text(
+        text = stringResource(R.string.brand_mark),
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.brand_mark),
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontFamily = DicomType.Brand,
-                fontWeight = FontWeight.W700,
-                color = DicomColors.Ink,
-                letterSpacing = (-0.2).sp,
-                lineHeight = 20.sp,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = stringResource(R.string.brand_product),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = DicomType.Brand,
-                fontWeight = FontWeight.Normal,
-                color = DicomColors.Slate700,
-                letterSpacing = 0.sp,
-                lineHeight = 18.sp,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontFamily = DicomType.Brand,
+            fontWeight = FontWeight.W700,
+            color = DicomColors.Ink,
+            letterSpacing = (-0.2).sp,
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+fun BrandProductLabel(
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = stringResource(R.string.brand_product),
+        modifier = modifier.fillMaxWidth(),
+        style = MaterialTheme.typography.bodyMedium.copy(
+            fontFamily = DicomType.Brand,
+            fontWeight = FontWeight.Normal,
+            color = DicomColors.Slate700,
+            letterSpacing = 0.sp,
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.End,
+    )
 }
 
 @Composable
@@ -100,31 +102,19 @@ fun BrandWordmark(
     modifier: Modifier = Modifier,
     size: Int = 18,
 ) {
-    Column(modifier = modifier) {
-        Text(
-            text = stringResource(R.string.brand_mark),
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontFamily = DicomType.Brand,
-                fontWeight = FontWeight.W700,
-                fontSize = size.sp,
-                brush = BrandGradient,
-                letterSpacing = (-0.2).sp,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = stringResource(R.string.brand_product),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = DicomType.Brand,
-                fontWeight = FontWeight.Normal,
-                fontSize = (size * 0.78f).sp,
-                color = DicomColors.Slate700,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    Text(
+        text = stringResource(R.string.brand_mark),
+        modifier = modifier,
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontFamily = DicomType.Brand,
+            fontWeight = FontWeight.W700,
+            fontSize = size.sp,
+            brush = BrandGradient,
+            letterSpacing = (-0.2).sp,
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -535,7 +525,8 @@ fun ChromeTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (branded) {
-            BrandLogo(modifier = Modifier.weight(1f))
+            BrandLogo()
+            BrandProductLabel(modifier = Modifier.weight(1f))
             actions()
         } else {
             if (navigationIcon != null) {

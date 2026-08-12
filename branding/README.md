@@ -30,6 +30,7 @@ These match current Play Console expectations for icon and feature graphic. Scre
 | Social / OG banner | 1280 × 640 | [`github-banner-1280x640.png`](github-banner-1280x640.png) |
 | README hero strip | 1280 × 320 | [`readme-hero-1280x320.png`](readme-hero-1280x320.png) |
 | App icon (same art) | 512 × 512 | [`app-icon-512.png`](app-icon-512.png) |
+| README screenshots | phone UI | [`screenshots/`](screenshots/) — Worklist, Archive, Settings |
 
 Set the GitHub repo **Social preview** image to `github-banner-1280x640.png` (Settings → General → Social preview).
 

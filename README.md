@@ -22,6 +22,22 @@
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="branding/screenshots/worklist.png" alt="Worklist with demo patients" width="30%" />
+  &nbsp;
+  <img src="branding/screenshots/archive.png" alt="Archive and pending uploads" width="30%" />
+  &nbsp;
+  <img src="branding/screenshots/settings.png" alt="Settings and About" width="30%" />
+</p>
+
+<p align="center">
+  <sub>Worklist · Archive · Settings — staging lab build (not for clinical use)</sub>
+</p>
+
+---
+
 ## Why this exists
 
 Clinical photos still end up in insecure channels (chat apps, personal cameras, gallery sync). Hospitals need a **modality-like** Android app that:

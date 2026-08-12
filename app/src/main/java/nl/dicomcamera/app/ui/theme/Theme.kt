@@ -71,6 +71,12 @@ object DicomType {
         Font(R.font.plus_jakarta_sans_extrabold, FontWeight.ExtraBold),
         Font(R.font.plus_jakarta_sans_extrabold, FontWeight.Black),
     )
+    /** Brand wordmark — Sansation (OFL). Bold ≈ 700 for “Arnout.pro”. */
+    val Brand = FontFamily(
+        Font(R.font.sansation_regular, FontWeight.Normal),
+        Font(R.font.sansation_bold, FontWeight.Bold),
+        Font(R.font.sansation_bold, FontWeight.W700),
+    )
     val Mono = FontFamily(
         Font(R.font.ibm_plex_mono_medium, FontWeight.Medium),
         Font(R.font.ibm_plex_mono_medium, FontWeight.Bold),

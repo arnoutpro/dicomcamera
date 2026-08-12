@@ -3,7 +3,6 @@ package nl.dicomcamera.app.ui.components
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,8 +46,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -66,32 +63,35 @@ fun BrandLogo(
     modifier: Modifier = Modifier,
     showWordmark: Boolean = true,
 ) {
-    Row(
+    if (!showWordmark) return
+    Column(
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // Black-square A-mark: keep as a rounded badge on light chrome.
-        Image(
-            painter = painterResource(R.drawable.brand_logo),
-            contentDescription = stringResource(R.string.brand_name),
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Crop,
+        Text(
+            text = stringResource(R.string.brand_mark),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontFamily = DicomType.Brand,
+                fontWeight = FontWeight.W700,
+                color = DicomColors.Ink,
+                letterSpacing = (-0.2).sp,
+                lineHeight = 20.sp,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        if (showWordmark) {
-            Text(
-                text = stringResource(R.string.brand_name),
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    color = DicomColors.Ink,
-                    letterSpacing = (-0.3).sp,
-                ),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text = stringResource(R.string.brand_product),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = DicomType.Brand,
+                fontWeight = FontWeight.Normal,
+                color = DicomColors.Slate700,
+                letterSpacing = 0.sp,
+                lineHeight = 18.sp,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -100,18 +100,31 @@ fun BrandWordmark(
     modifier: Modifier = Modifier,
     size: Int = 18,
 ) {
-    Text(
-        text = stringResource(R.string.brand_name),
-        modifier = modifier,
-        style = MaterialTheme.typography.titleMedium.copy(
-            fontSize = size.sp,
-            fontWeight = FontWeight.Black,
-            brush = BrandGradient,
-            letterSpacing = (-0.3).sp,
-        ),
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
+    Column(modifier = modifier) {
+        Text(
+            text = stringResource(R.string.brand_mark),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontFamily = DicomType.Brand,
+                fontWeight = FontWeight.W700,
+                fontSize = size.sp,
+                brush = BrandGradient,
+                letterSpacing = (-0.2).sp,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = stringResource(R.string.brand_product),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = DicomType.Brand,
+                fontWeight = FontWeight.Normal,
+                fontSize = (size * 0.78f).sp,
+                color = DicomColors.Slate700,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable

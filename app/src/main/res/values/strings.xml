@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">Arnout.pro DICOM Camera</string>
     <string name="brand_name">Arnout.pro DICOM Camera</string>
+    <string name="brand_mark">Arnout.pro</string>
+    <string name="brand_product">DICOM Camera</string>
 
     <string name="about_purpose_title">Intended purpose</string>
     <string name="about_purpose_body">Clinical photo and video documentation for healthcare professionals: bind media to the correct patient/order, encode as DICOM, and send to the hospital PACS. Not for diagnosis, triage, or long-term storage on this device.</string>

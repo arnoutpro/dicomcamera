@@ -37,11 +37,11 @@ dependencies {
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
 
     // DICOMweb (QIDO-RS / STOW-RS)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     implementation("org.json:json:20260719")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("com.google.truth:truth:1.4.4")
-    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
 }

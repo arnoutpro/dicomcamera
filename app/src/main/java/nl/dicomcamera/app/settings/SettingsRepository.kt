@@ -122,6 +122,11 @@ data class PacsSettings(
 
     fun fhirSummary(): String = toFhirConfig().summary()
 
+    /** True when an enabled EHR façade URL is cleartext HTTP (bearer would travel unprotected). */
+    fun ehrUsesCleartextHttp(): Boolean =
+        (hl7Enabled && hl7BaseUrl.trim().startsWith("http://")) ||
+            (fhirEnabled && fhirBaseUrl.trim().startsWith("http://"))
+
     fun identitySummary(): String {
         val parts = mutableListOf<String>()
         if (toFhirConfig().isConfigured()) parts += "FHIR"
@@ -150,9 +155,11 @@ class SettingsRepository(private val context: Context) {
         val station = stringPreferencesKey("station_name")
         val hl7Enabled = booleanPreferencesKey("hl7_enabled")
         val hl7Url = stringPreferencesKey("hl7_base_url")
+        /** @deprecated Tokens moved to [EncryptedTokenStore]; kept only for one-shot migration. */
         val hl7Token = stringPreferencesKey("hl7_bearer_token")
         val fhirEnabled = booleanPreferencesKey("fhir_enabled")
         val fhirUrl = stringPreferencesKey("fhir_base_url")
+        /** @deprecated Tokens moved to [EncryptedTokenStore]; kept only for one-shot migration. */
         val fhirToken = stringPreferencesKey("fhir_bearer_token")
         val identityMode = stringPreferencesKey("identity_lookup_mode")
         val adminLocked = booleanPreferencesKey("admin_config_locked")
@@ -160,6 +167,11 @@ class SettingsRepository(private val context: Context) {
     }
 
     val settings: Flow<PacsSettings> = context.dataStore.data.map { prefs ->
+        val encryptedHl7 = EncryptedTokenStore.readHl7(context)
+        val encryptedFhir = EncryptedTokenStore.readFhir(context)
+        // Prefer encrypted store; fall back to legacy plaintext keys until migrateLegacyTokens().
+        val hl7Token = encryptedHl7.ifEmpty { prefs[Keys.hl7Token].orEmpty() }
+        val fhirToken = encryptedFhir.ifEmpty { prefs[Keys.fhirToken].orEmpty() }
         val local = PacsSettings(
             callingAeTitle = prefs[Keys.calling] ?: BuildConfig.DEFAULT_CALLING_AET,
             modality = prefs[Keys.modality] ?: "XC",
@@ -174,10 +186,10 @@ class SettingsRepository(private val context: Context) {
             dicomWebBaseUrl = prefs[Keys.webUrl] ?: BuildConfig.DEFAULT_DICOMWEB_URL,
             hl7Enabled = prefs[Keys.hl7Enabled] ?: false,
             hl7BaseUrl = prefs[Keys.hl7Url].orEmpty(),
-            hl7BearerToken = prefs[Keys.hl7Token].orEmpty(),
+            hl7BearerToken = hl7Token,
             fhirEnabled = prefs[Keys.fhirEnabled] ?: false,
             fhirBaseUrl = prefs[Keys.fhirUrl].orEmpty(),
-            fhirBearerToken = prefs[Keys.fhirToken].orEmpty(),
+            fhirBearerToken = fhirToken,
             identityLookupMode = prefs[Keys.identityMode]?.let {
                 runCatching { IdentityLookupMode.valueOf(it) }.getOrDefault(IdentityLookupMode.FHIR_THEN_HL7)
             } ?: IdentityLookupMode.FHIR_THEN_HL7,
@@ -188,12 +200,34 @@ class SettingsRepository(private val context: Context) {
     }
 
     /**
+     * One-shot: move bearer tokens from plaintext DataStore into EncryptedSharedPreferences
+     * and delete the legacy keys. Safe to call on every launch.
+     */
+    suspend fun migrateLegacyTokens() {
+        context.dataStore.edit { prefs ->
+            val legacyHl7 = prefs[Keys.hl7Token].orEmpty()
+            val legacyFhir = prefs[Keys.fhirToken].orEmpty()
+            if (legacyHl7.isEmpty() && legacyFhir.isEmpty()) return@edit
+            val hl7 = EncryptedTokenStore.readHl7(context).ifEmpty { legacyHl7 }
+            val fhir = EncryptedTokenStore.readFhir(context).ifEmpty { legacyFhir }
+            EncryptedTokenStore.write(context, hl7, fhir)
+            prefs.remove(Keys.hl7Token)
+            prefs.remove(Keys.fhirToken)
+        }
+    }
+
+    /**
      * Persist settings. Returns false when MDM owns config and local save is skipped.
      */
     suspend fun save(settings: PacsSettings): Boolean {
         if (ManagedConfig.isManaged(context)) {
             return false
         }
+        EncryptedTokenStore.write(
+            context,
+            hl7 = settings.hl7BearerToken,
+            fhir = settings.fhirBearerToken,
+        )
         context.dataStore.edit { prefs ->
             prefs[Keys.calling] = settings.callingAeTitle.trim()
             prefs[Keys.modality] = settings.modality.trim().ifBlank { "XC" }
@@ -206,10 +240,10 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.webUrl] = settings.dicomWebBaseUrl.trim()
             prefs[Keys.hl7Enabled] = settings.hl7Enabled
             prefs[Keys.hl7Url] = settings.hl7BaseUrl.trim()
-            prefs[Keys.hl7Token] = settings.hl7BearerToken.trim()
+            prefs.remove(Keys.hl7Token)
             prefs[Keys.fhirEnabled] = settings.fhirEnabled
             prefs[Keys.fhirUrl] = settings.fhirBaseUrl.trim()
-            prefs[Keys.fhirToken] = settings.fhirBearerToken.trim()
+            prefs.remove(Keys.fhirToken)
             prefs[Keys.identityMode] = settings.identityLookupMode.name
             prefs[Keys.adminLocked] = settings.adminConfigLocked
             prefs[Keys.loggingEnabled] = settings.loggingEnabled

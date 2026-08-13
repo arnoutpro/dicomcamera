@@ -9,6 +9,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 
 class PacsEchoStoreSpikeTest {
     @get:Rule
@@ -126,6 +127,25 @@ class PacsEchoStoreSpikeTest {
         val results = staging.wipeAll()
         assertThat(results).hasSize(2)
         assertThat(results.all { it.second == WipeResult.Wiped }).isTrue()
+        assertThat(staging.listStagingFiles()).isEmpty()
+    }
+
+    @Test
+    fun purgeOrphans_wipes_camera_subdirectory() {
+        val staging = SecureStaging(temp.newFolder("staging3"))
+        val cameraDir = File(staging.directory, "camera").also { check(it.mkdirs()) }
+        val orphan = File(cameraDir, "capture-orphan.jpg").also {
+            it.writeBytes(byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2, 1))
+        }
+        val topLevel = staging.createStagingFile("vl", "dcm").also {
+            it.writeBytes(byteArrayOf(1, 2, 3))
+        }
+
+        assertThat(staging.listStagingFiles()).hasSize(2)
+        val purged = staging.purgeOrphans()
+        assertThat(purged).isEqualTo(2)
+        assertThat(orphan.exists()).isFalse()
+        assertThat(topLevel.exists()).isFalse()
         assertThat(staging.listStagingFiles()).isEmpty()
     }
 

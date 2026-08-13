@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import nl.dicomcamera.app.BuildConfig
 import nl.dicomcamera.app.R
@@ -652,6 +653,12 @@ private fun EhrIdentitySection(
             title = "EHR identity",
             subtitle = "Resolve demographics from the EPD via FHIR and/or HL7 façade. Pixels still go to PACS only.",
         )
+        if (draft.ehrUsesCleartextHttp()) {
+            StatusBanner(
+                text = "Cleartext HTTP EHR URL — bearer tokens travel unprotected. Use HTTPS in pilots.",
+                tone = StatusTone.Warn,
+            )
+        }
         SoftPanel {
             SectionLabel("Lookup order")
             listOf(
@@ -721,6 +728,7 @@ private fun EhrIdentitySection(
                 onValueChange = { if (!locked) onChange(draft.copy(fhirBearerToken = it)) },
                 label = "Bearer token (optional)",
                 enabled = !locked,
+                visualTransformation = PasswordVisualTransformation(),
             )
             Text(draft.fhirSummary(), style = MaterialTheme.typography.bodyMedium)
         }
@@ -763,6 +771,7 @@ private fun EhrIdentitySection(
                 onValueChange = { if (!locked) onChange(draft.copy(hl7BearerToken = it)) },
                 label = "Bearer token (optional)",
                 enabled = !locked,
+                visualTransformation = PasswordVisualTransformation(),
             )
             Text(draft.hl7Summary(), style = MaterialTheme.typography.bodyMedium)
         }

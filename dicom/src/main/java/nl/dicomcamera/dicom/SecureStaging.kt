@@ -7,6 +7,9 @@ import java.security.SecureRandom
 /**
  * Ephemeral staging for capture bytes. Files live only until successful PACS send,
  * move into [PendingStoreQueue], or discard. Never writes to shared media galleries.
+ *
+ * Capture intermediates may live under a `camera/` subdirectory; wipe helpers recurse
+ * so crash recovery does not leave PHI behind.
  */
 class SecureStaging(
     private val stagingDir: File,
@@ -31,6 +34,22 @@ class SecureStaging(
      */
     fun wipe(file: File): WipeResult {
         if (!file.exists()) return WipeResult.AlreadyGone
+        if (file.isDirectory) {
+            return wipeDirectory(file)
+        }
+        return wipeFileContents(file)
+    }
+
+    /**
+     * Retries wipe once on failure. Prefer this after a successful PACS ACK.
+     */
+    fun wipeAfterAck(file: File): WipeResult {
+        val first = wipe(file)
+        if (first !is WipeResult.Failed) return first
+        return wipe(file)
+    }
+
+    private fun wipeFileContents(file: File): WipeResult {
         return try {
             val length = file.length()
             if (length > 0) {
@@ -57,15 +76,39 @@ class SecureStaging(
         }
     }
 
-    fun wipeAll(): List<Pair<File, WipeResult>> {
-        val files = stagingDir.listFiles()?.filter { it.isFile }?.toList().orEmpty()
-        return files.map { it to wipe(it) }
+    private fun wipeDirectory(dir: File): WipeResult {
+        var failed: WipeResult.Failed? = null
+        dir.walkBottomUp().forEach { entry ->
+            when {
+                entry.isFile -> {
+                    val result = wipeFileContents(entry)
+                    if (result is WipeResult.Failed && failed == null) failed = result
+                }
+                entry.isDirectory && entry != dir -> {
+                    if (!entry.delete() && entry.exists() && failed == null) {
+                        failed = WipeResult.Failed("delete() returned false for ${entry.absolutePath}")
+                    }
+                }
+            }
+        }
+        if (!dir.delete() && dir.exists() && failed == null) {
+            failed = WipeResult.Failed("delete() returned false for ${dir.absolutePath}")
+        }
+        return failed ?: WipeResult.Wiped
     }
 
-    fun listStagingFiles(): List<File> =
-        stagingDir.listFiles()?.filter { it.isFile }?.toList().orEmpty()
+    fun wipeAll(): List<Pair<File, WipeResult>> {
+        return listStagingFiles().map { it to wipe(it) }
+    }
 
-    /** Crash recovery: wipe leftover files in the hot staging folder (not pending/). */
+    fun listStagingFiles(): List<File> {
+        if (!stagingDir.exists()) return emptyList()
+        return stagingDir.walkTopDown()
+            .filter { it.isFile }
+            .toList()
+    }
+
+    /** Crash recovery: wipe leftover files under staging (including camera/), not pending/. */
     fun purgeOrphans(): Int = wipeAll().count { it.second is WipeResult.Wiped || it.second is WipeResult.AlreadyGone }
 }
 

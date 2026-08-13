@@ -17,6 +17,8 @@ data class Hl7FacadeConfig(
     fun summary(): String = when {
         !enabled -> "Disabled"
         baseUrl.isBlank() -> "Enabled — URL not set"
+        baseUrl.trim().startsWith("http://") ->
+            "${baseUrl.trim()} · CLEARTEXT HTTP (prefer HTTPS — bearer is unprotected)"
         else -> baseUrl.trim()
     }
 }

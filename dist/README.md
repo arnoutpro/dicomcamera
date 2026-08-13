@@ -19,10 +19,10 @@ Prebuilt **Android APKs** for lab colleagues who want to try **Arnout.pro DICOM 
 |---|---|
 | **App label** | Arnout.pro DICOM Camera |
 | **Package** | `nl.dicomcamera.app.staging` |
-| **Version** | `0.6.9-lab-disclaimer-staging` (`versionCode` 18) |
+| **Version** | `0.6.10-security-audit-staging` (`versionCode` 19) |
 | **Min / target SDK** | 26 / 35 (Android 8.0+) |
 | **Signing** | Android **debug** keystore (not a release / Play key) |
-| **Flavor** | `staging` — empty PACS defaults; you configure Settings (or MDM later) |
+| **Flavor** | `staging` — empty PACS defaults; you configure Settings (or MDM later). Cleartext HTTP blocked (use DIMSE or HTTPS for DICOMweb/EHR; **dev** flavor still allows lab Orthanc HTTP). |
 
 CI also uploads fresh debug APKs as workflow artifacts on pushes/PRs (`dicomcamera-debug-apks`). Prefer those if you need a build newer than the file committed here.
 

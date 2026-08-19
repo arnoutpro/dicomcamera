@@ -61,7 +61,11 @@ class Hl7PatientDirectory(
         http.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                throw IllegalStateException("HL7 façade HTTP ${response.code}: ${response.message} $body")
+                // Never embed response bodies in exceptions — they may contain PHI and are
+                // surfaced in UI / opt-in diagnostic logs.
+                throw IllegalStateException(
+                    "HL7 façade HTTP ${response.code}: ${response.message}",
+                )
             }
             if (body.isBlank()) return emptyList()
             return parsePatients(body)

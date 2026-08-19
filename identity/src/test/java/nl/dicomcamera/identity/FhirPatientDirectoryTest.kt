@@ -77,6 +77,28 @@ class FhirPatientDirectoryTest {
     }
 
     @Test
+    fun http_error_omits_response_body_from_exception() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(500)
+                .setBody("""{"resourceType":"OperationOutcome","issue":[{"diagnostics":"SYNTH-PATIENT-LEAK"}]}"""),
+        )
+        val directory = FhirPatientDirectory(
+            configProvider = {
+                FhirConfig(enabled = true, baseUrl = server.url("/fhir").toString().trimEnd('/'))
+            },
+        )
+        try {
+            directory.findPatients(PatientQuery(patientId = "1"))
+            throw AssertionError("expected failure")
+        } catch (e: IllegalStateException) {
+            assertThat(e.message).contains("FHIR Patient HTTP 500")
+            assertThat(e.message).doesNotContain("SYNTH-PATIENT-LEAK")
+            assertThat(e.message).doesNotContain("OperationOutcome")
+        }
+    }
+
+    @Test
     fun composite_falls_back_to_hl7() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
         server.enqueue(

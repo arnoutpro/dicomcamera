@@ -94,7 +94,9 @@ class DicomWebClient(
                         ?: "stow-ok"
                     StoreResult.Success(sop)
                 } else {
-                    StoreResult.Failed("STOW-RS HTTP ${response.code}: ${response.message} $responseText")
+                    // Omit response body — may include DICOM JSON demographics; failures are
+                    // persisted in the pending queue and shown in the UI.
+                    StoreResult.Failed("STOW-RS HTTP ${response.code}: ${response.message}")
                 }
             }
         } catch (e: Exception) {

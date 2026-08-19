@@ -84,6 +84,31 @@ class DicomWebClientTest {
     }
 
     @Test
+    fun stow_failure_omits_response_body_from_error() {
+        val leakyBody =
+            """{"00100020":{"vr":"LO","Value":["SYNTH-LEAK"]},"00100010":{"vr":"PN","Value":[{"Alphabetic":"DOE^JANE"}]}}"""
+        server.enqueue(MockResponse().setResponseCode(500).setBody(leakyBody))
+        val jpeg = javaClass.getResourceAsStream("/sample.jpg")!!.use { it.readBytes() }
+        val dicomFile = temp.newFile("fail.dcm")
+        PhotographicImageEncoder().encodeJpegToFile(
+            jpegBytes = jpeg,
+            context = PatientStudyContext(patientId = "W1", patientName = "WEB^ONE"),
+            rows = 16,
+            columns = 16,
+            outputFile = dicomFile,
+        )
+
+        DicomWebClient(baseUrl()).use { client ->
+            val store = client.stow(dicomFile)
+            assertThat(store).isInstanceOf(StoreResult.Failed::class.java)
+            val message = (store as StoreResult.Failed).message
+            assertThat(message).contains("STOW-RS HTTP 500")
+            assertThat(message).doesNotContain("SYNTH-LEAK")
+            assertThat(message).doesNotContain("DOE^JANE")
+        }
+    }
+
+    @Test
     fun gateway_dicomweb_store_and_qido() {
         val qidoJson = """
             [{"00100020":{"vr":"LO","Value":["G1"]},

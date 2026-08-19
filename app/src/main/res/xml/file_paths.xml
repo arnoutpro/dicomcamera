@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- SecureStaging root + camera subdirectory (app-private filesDir) -->
-    <files-path name="staging" path="staging/" />
-    <files-path name="capture" path="capture/" />
-    <!-- ColorOS-friendly FileProvider capture target (app-private external files) -->
+    <!-- Only the EXTRA_OUTPUT target is shared via FileProvider.
+         Staging / pending / local-archive stay app-private and must not be exposable. -->
     <external-files-path name="ext_pictures_capture" path="Pictures/capture/" />
 </paths>

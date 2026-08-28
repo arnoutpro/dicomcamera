@@ -6,9 +6,9 @@ Hospital / EPD IT guide for piloting **DICOM Camera** (Android).
 
 ```
 Android device (MDM)
-  → DIMSE (C-ECHO / MWL / C-FIND / C-STORE) and/or
-  → DICOMweb (QIDO-RS / STOW-RS)
-  → PACS / VNA
+  → DIMSE archive (C-ECHO / C-FIND / C-STORE) and/or DICOMweb (QIDO-RS / STOW-RS)
+  → DIMSE MWL (C-FIND) — dedicated worklist SCP, or archive DIMSE fallback
+  → PACS / VNA + optional RIS/MWL broker
 ```
 
 No durable clinical archive on the device after successful send. Ephemeral staging + pending retry queue only.
@@ -35,8 +35,14 @@ Restrictions schema: `app/src/main/res/xml/app_restrictions.xml`
 | `pacs_calling_aet` | `DICOMCAM` |
 | `pacs_use_tls` | `true` |
 | `pacs_dicomweb_url` | `https://pacs.hospital.local/dicom-web` |
+| `mwl_host` | `mwl.hospital.local` (empty → use archive DIMSE) |
+| `mwl_port` | `11112` |
+| `mwl_called_aet` | `MWLSCP` |
+| `mwl_use_tls` | `true` |
 
 When restrictions are present, the app treats settings as **MDM-managed** (UI read-only).
+
+Archive DIMSE (`pacs_host` / `pacs_port` / `pacs_called_aet`) is used for **C-STORE**, **C-ECHO**, and **Study FIND**. Modality Worklist is a **separate** DIMSE destination (`mwl_*`). If `mwl_host` and `mwl_called_aet` are left empty, MWL C-FIND falls back to the archive DIMSE node (typical for lab Orthanc). A partially filled MWL destination does not fall back — fill host, port, and called AE together.
 
 ## Flavors
 

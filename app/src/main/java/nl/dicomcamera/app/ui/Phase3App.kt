@@ -382,6 +382,7 @@ fun Phase3App() {
                     patient = patient,
                     onPatientChange = { patient = it },
                     pacsConfigured = pacsSettings.isConfigured(),
+                    mwlConfigured = pacsSettings.isMwlConfigured(),
                     hl7Configured = pacsSettings.toHl7Config().isConfigured(),
                     fhirConfigured = pacsSettings.toFhirConfig().isConfigured(),
                     ehrConfigured = pacsSettings.toHl7Config().isConfigured() ||
@@ -583,6 +584,34 @@ fun Phase3App() {
                                 }
                             }
                             diagnosticLog.log("archive_ping", statusNote)
+                            logUiTick++
+                        }
+                    },
+                    onMwlPing = { draft ->
+                        scope.launch {
+                            statusNote = "MWL ping…"
+                            val host = draft.mwlHost.trim().ifBlank { draft.host.trim() }
+                            val result = withContext(Dispatchers.IO) {
+                                HostPing.ping(host)
+                            }
+                            diagnosticLog.log("mwl_ping", result.message)
+                            statusNote = result.message
+                            logUiTick++
+                        }
+                    },
+                    onMwlEcho = { draft ->
+                        scope.launch {
+                            statusNote = "MWL C-ECHO…"
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    PacsGateway.fromEndpoint(draft.toEndpoint()).pingMwl()
+                                }.getOrElse { EchoResult.Failed(it.message ?: "MWL echo failed", it) }
+                            }
+                            statusNote = when (result) {
+                                EchoResult.Success -> "MWL C-ECHO OK"
+                                is EchoResult.Failed -> "MWL C-ECHO failed: ${result.message}"
+                            }
+                            diagnosticLog.log("mwl_echo", statusNote)
                             logUiTick++
                         }
                     },
@@ -997,6 +1026,7 @@ private fun WorklistTab(
     patient: ManualPatientForm,
     onPatientChange: (ManualPatientForm) -> Unit,
     pacsConfigured: Boolean,
+    mwlConfigured: Boolean,
     hl7Configured: Boolean,
     fhirConfigured: Boolean,
     ehrConfigured: Boolean,
@@ -1060,7 +1090,7 @@ private fun WorklistTab(
                         )
                     }
                 }
-                if (pacsConfigured) {
+                if (mwlConfigured) {
                     WorklistScreen(
                         endpoint = node,
                         callingAeTitle = callingAeTitle,
@@ -1070,7 +1100,7 @@ private fun WorklistTab(
                     )
                 } else {
                     StatusBanner(
-                        text = "Live MWL needs Remote DICOM in Settings. Demo patients work offline.",
+                        text = "Live MWL needs an MWL destination in Settings (or archive DIMSE fallback). Demo patients work offline.",
                         tone = StatusTone.Info,
                     )
                     QuietOutlinedButton(

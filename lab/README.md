@@ -16,7 +16,7 @@ docker compose up -d
 | AE Title | `ORTHANC` |
 | HTTP UI | http://localhost:8042 |
 
-Use the app **dev** flavor defaults (`10.0.2.2:4242` / `ORTHANC` / `DICOMCAM`).
+Use the app **dev** flavor defaults (`10.0.2.2:4242` / `ORTHANC` / `DICOMCAM`). Leave **MWL** empty to reuse that same Orthanc node for worklist, or set a dedicated MWL host/AE when the SCP is separate.
 
 Stop:
 

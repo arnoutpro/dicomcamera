@@ -74,7 +74,7 @@ Clinical photos still end up in insecure channels (chat apps, personal cameras, 
 - Demo patients for offline exploration  
 
 ### Integration
-- **DIMSE:** C-ECHO, C-STORE, MWL, Study FIND  
+- **DIMSE:** archive C-ECHO / C-STORE / Study FIND, plus a separate MWL C-FIND destination  
 - **DICOMweb:** QIDO-RS + STOW-RS (selectable per site)  
 - Android **Managed Configurations** (MDM) for AE Titles, hosts, EHR endpoints  
 - **ATNA-style** audit export (system save dialog)  

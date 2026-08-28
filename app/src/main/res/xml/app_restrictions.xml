@@ -14,12 +14,12 @@
         android:defaultValue="" />
     <restriction
         android:key="pacs_port"
-        android:title="PACS DIMSE port"
+        android:title="PACS DIMSE port (C-STORE)"
         android:restrictionType="integer"
         android:defaultValue="11112" />
     <restriction
         android:key="pacs_called_aet"
-        android:title="Called AE Title"
+        android:title="Called AE Title (archive)"
         android:restrictionType="string"
         android:defaultValue="PACS" />
     <restriction
@@ -29,7 +29,7 @@
         android:defaultValue="DICOMCAM" />
     <restriction
         android:key="pacs_use_tls"
-        android:title="Use DICOM TLS"
+        android:title="Use DICOM TLS (archive)"
         android:restrictionType="bool"
         android:defaultValue="false" />
     <restriction
@@ -37,6 +37,26 @@
         android:title="DICOMweb base URL"
         android:restrictionType="string"
         android:defaultValue="" />
+    <restriction
+        android:key="mwl_host"
+        android:title="MWL host"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="mwl_port"
+        android:title="MWL DIMSE port"
+        android:restrictionType="integer"
+        android:defaultValue="11112" />
+    <restriction
+        android:key="mwl_called_aet"
+        android:title="MWL called AE Title"
+        android:restrictionType="string"
+        android:defaultValue="" />
+    <restriction
+        android:key="mwl_use_tls"
+        android:title="Use DICOM TLS for MWL"
+        android:restrictionType="bool"
+        android:defaultValue="false" />
     <restriction
         android:key="modality_code"
         android:title="Modality code"

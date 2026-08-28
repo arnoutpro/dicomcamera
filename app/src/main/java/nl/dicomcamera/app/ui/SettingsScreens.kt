@@ -53,12 +53,13 @@ private enum class SettingsSection {
     Transport,
     LocalAe,
     RemoteDicom,
+    Mwl,
     EhrIdentity,
     Logging,
 }
 
 /**
- * Settings hub: Transport, Local AE, Remote DICOM, EHR identity (HL7+FHIR), Logging/ATNA.
+ * Settings hub: Transport, Local AE, Remote DICOM (C-STORE), MWL, EHR identity, Logging/ATNA.
  * Draft edits auto-save when leaving a section or leaving Settings entirely.
  */
 @Composable
@@ -69,6 +70,8 @@ fun SettingsFlow(
     onSave: (PacsSettings) -> Unit,
     onPing: (PacsSettings) -> Unit,
     onEcho: (PacsSettings) -> Unit,
+    onMwlPing: (PacsSettings) -> Unit,
+    onMwlEcho: (PacsSettings) -> Unit,
     onLoggingEnabledChange: (PacsSettings, Boolean) -> Unit,
     onDownloadLog: () -> Unit,
     onClearLog: () -> Unit,
@@ -104,6 +107,7 @@ fun SettingsFlow(
                 SettingsSection.Transport -> "Transport"
                 SettingsSection.LocalAe -> "Local AE"
                 SettingsSection.RemoteDicom -> "Remote DICOM"
+                SettingsSection.Mwl -> "MWL"
                 SettingsSection.EhrIdentity -> "EHR identity"
                 SettingsSection.Logging -> "Logging"
             },
@@ -116,6 +120,7 @@ fun SettingsFlow(
             onOpenTransport = { section = SettingsSection.Transport },
             onOpenLocal = { section = SettingsSection.LocalAe },
             onOpenRemote = { section = SettingsSection.RemoteDicom },
+            onOpenMwl = { section = SettingsSection.Mwl },
             onOpenEhr = { section = SettingsSection.EhrIdentity },
             onOpenLogging = { section = SettingsSection.Logging },
             onSave = { persistAnd() },
@@ -142,6 +147,16 @@ fun SettingsFlow(
             onChange = { draft = it },
             onPing = { onPing(draft) },
             onEcho = { onEcho(draft) },
+            onBack = { goHub() },
+            onSave = { persistAnd() },
+        )
+        SettingsSection.Mwl -> MwlSection(
+            draft = draft,
+            locked = locked,
+            connectivityStatus = connectivityStatus,
+            onChange = { draft = it },
+            onPing = { onMwlPing(draft) },
+            onEcho = { onMwlEcho(draft) },
             onBack = { goHub() },
             onSave = { persistAnd() },
         )
@@ -174,6 +189,7 @@ private fun SettingsHub(
     onOpenTransport: () -> Unit,
     onOpenLocal: () -> Unit,
     onOpenRemote: () -> Unit,
+    onOpenMwl: () -> Unit,
     onOpenEhr: () -> Unit,
     onOpenLogging: () -> Unit,
     onSave: () -> Unit,
@@ -220,6 +236,11 @@ private fun SettingsHub(
                 title = "Remote DICOM",
                 subtitle = draft.remoteSummary(),
                 onClick = onOpenRemote,
+            )
+            SettingsNavRow(
+                title = "MWL (worklist)",
+                subtitle = draft.mwlSummary(),
+                onClick = onOpenMwl,
             )
             SettingsNavRow(
                 title = "EHR identity",
@@ -356,7 +377,7 @@ private fun TransportSection(
         SoftPanel {
             SectionLabel("Mode")
             listOf(
-                TransportMode.DIMSE to "DIMSE — classic DICOM (C-ECHO, MWL, C-STORE)",
+                TransportMode.DIMSE to "DIMSE — classic DICOM (C-ECHO, C-STORE, Study FIND)",
                 TransportMode.DICOMWEB to "DICOMweb — QIDO-RS query + STOW-RS store",
             ).forEach { (mode, label) ->
                 Row(
@@ -385,7 +406,7 @@ private fun TransportSection(
                 }
             }
             Text(
-                "MWL always uses DIMSE. In DICOMweb mode, keep host/AE filled if you need worklist.",
+                "MWL always uses DIMSE against the MWL destination (or archive DIMSE fallback if MWL is empty).",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
@@ -487,36 +508,21 @@ private fun RemoteDicomSection(
         QuietOutlinedButton(text = "← Back & save", onClick = onBack)
         ScreenTitle(
             title = "Remote DICOM",
-            subtitle = "Archive / PACS endpoint for worklist, query, and store.",
+            subtitle = "Archive / PACS for C-STORE, C-ECHO, and study query. Worklist has its own destination.",
         )
         SoftPanel {
-            SectionLabel("PACS node (DIMSE / MWL)")
-            DicomTextField(
-                value = draft.host,
-                onValueChange = { if (!locked) onChange(draft.copy(host = it)) },
-                label = "Host / IP",
-                enabled = !locked,
-            )
-            DicomTextField(
-                value = draft.port.toString(),
-                onValueChange = { text ->
-                    if (!locked) {
-                        onChange(
-                            draft.copy(port = text.filter { it.isDigit() }.toIntOrNull() ?: draft.port),
-                        )
-                    }
-                },
-                label = "DIMSE port",
-                enabled = !locked,
-            )
-            DicomTextField(
-                value = draft.calledAeTitle,
-                onValueChange = { if (!locked) onChange(draft.copy(calledAeTitle = it)) },
-                label = "Called AE Title",
-                enabled = !locked,
+            SectionLabel("Archive DIMSE (C-STORE)")
+            DimseDestinationFields(
+                host = draft.host,
+                port = draft.port,
+                calledAeTitle = draft.calledAeTitle,
+                locked = locked,
+                onHostChange = { onChange(draft.copy(host = it)) },
+                onPortChange = { onChange(draft.copy(port = it)) },
+                onCalledChange = { onChange(draft.copy(calledAeTitle = it)) },
             )
             Text(
-                "Remote archive AE (e.g. ORTHANC, PACS). Also used as MWL fallback in DICOMweb mode.",
+                "Remote archive AE (e.g. ORTHANC, PACS). Used for C-STORE and Study FIND, not MWL.",
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
@@ -542,27 +548,13 @@ private fun RemoteDicomSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = DicomColors.Slate700,
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (draft.useTls) "TLS enabled" else "TLS disabled",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Switch(
-                    checked = draft.useTls,
-                    onCheckedChange = { if (!locked) onChange(draft.copy(useTls = it)) },
-                    enabled = !locked,
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = DicomColors.Forest,
-                        checkedThumbColor = DicomColors.White,
-                        uncheckedTrackColor = DicomColors.Hairline,
-                        uncheckedThumbColor = DicomColors.Slate500,
-                    ),
-                )
-            }
+            TlsSwitchRow(
+                enabledLabel = "TLS enabled",
+                disabledLabel = "TLS disabled",
+                checked = draft.useTls,
+                locked = locked,
+                onCheckedChange = { onChange(draft.copy(useTls = it)) },
+            )
         }
         SoftPanel {
             SectionLabel("Connectivity tests")
@@ -629,6 +621,190 @@ private fun RemoteDicomSection(
             "Changes also save when you tap Back or leave Settings.",
             style = MaterialTheme.typography.bodySmall,
             color = DicomColors.Slate500,
+        )
+    }
+}
+
+@Composable
+private fun MwlSection(
+    draft: PacsSettings,
+    locked: Boolean,
+    connectivityStatus: String,
+    onChange: (PacsSettings) -> Unit,
+    onPing: () -> Unit,
+    onEcho: () -> Unit,
+    onBack: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val pingHost = draft.mwlHost.trim().ifBlank { draft.host.trim() }
+    val pingReady = pingHost.isNotBlank()
+    val mwlReady = draft.isMwlConfigured()
+    val usingFallback = !draft.toEndpoint().hasDedicatedMwl() && mwlReady
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        QuietOutlinedButton(text = "← Back & save", onClick = onBack)
+        ScreenTitle(
+            title = "MWL (worklist)",
+            subtitle = "Modality Worklist C-FIND SCP. Often a RIS/broker AE, not the archive.",
+        )
+        if (usingFallback) {
+            StatusBanner(
+                text = "MWL fields empty — worklist uses archive DIMSE (${draft.host}:${draft.port} → ${draft.calledAeTitle}).",
+                tone = StatusTone.Info,
+            )
+        }
+        SoftPanel {
+            SectionLabel("MWL DIMSE (C-FIND)")
+            DimseDestinationFields(
+                host = draft.mwlHost,
+                port = draft.mwlPort,
+                calledAeTitle = draft.mwlCalledAeTitle,
+                locked = locked,
+                onHostChange = { onChange(draft.copy(mwlHost = it)) },
+                onPortChange = { onChange(draft.copy(mwlPort = it)) },
+                onCalledChange = { onChange(draft.copy(mwlCalledAeTitle = it)) },
+            )
+            Text(
+                "Leave host and called AE blank to reuse the archive DIMSE node (lab Orthanc). Calling AE is the Local AE.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            QuietOutlinedButton(
+                text = "Copy from archive DIMSE",
+                onClick = { if (!locked) onChange(draft.copyArchiveDimseToMwl()) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !locked && draft.host.isNotBlank(),
+            )
+        }
+        SoftPanel {
+            SectionLabel("Security")
+            TlsSwitchRow(
+                enabledLabel = "MWL TLS enabled",
+                disabledLabel = "MWL TLS disabled",
+                checked = draft.mwlUseTls,
+                locked = locked,
+                onCheckedChange = { onChange(draft.copy(mwlUseTls = it)) },
+            )
+            Text(
+                "Independent of archive TLS. Fallback to archive DIMSE also reuses the archive TLS flag.",
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+        }
+        SoftPanel {
+            SectionLabel("Connectivity tests")
+            Text(
+                if (usingFallback) {
+                    "Fallback ${draft.host.ifBlank { "?" }}:${draft.port} → ${draft.calledAeTitle.ifBlank { "?" }}"
+                } else {
+                    "${draft.mwlHost.ifBlank { "?" }}:${draft.mwlPort} → ${draft.mwlCalledAeTitle.ifBlank { "?" }}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = DicomColors.Slate700,
+            )
+            QuietOutlinedButton(
+                text = "Ping MWL host",
+                onClick = onPing,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = pingReady,
+            )
+            QuietOutlinedButton(
+                text = "C-ECHO (MWL)",
+                onClick = onEcho,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = mwlReady,
+            )
+            if (!mwlReady) {
+                Text(
+                    "Fill MWL host, port, and called AE — or archive DIMSE as fallback — plus Local Calling AE.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DicomColors.Slate500,
+                )
+            }
+            if (connectivityStatus.isNotBlank()) {
+                StatusBanner(text = connectivityStatus, tone = connectivityTone(connectivityStatus))
+            }
+        }
+        ForestButton(
+            text = "Save MWL",
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !locked,
+        )
+        Text(
+            "Changes also save when you tap Back or leave Settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = DicomColors.Slate500,
+        )
+    }
+}
+
+@Composable
+private fun DimseDestinationFields(
+    host: String,
+    port: Int,
+    calledAeTitle: String,
+    locked: Boolean,
+    onHostChange: (String) -> Unit,
+    onPortChange: (Int) -> Unit,
+    onCalledChange: (String) -> Unit,
+) {
+    DicomTextField(
+        value = host,
+        onValueChange = { if (!locked) onHostChange(it) },
+        label = "Host / IP",
+        enabled = !locked,
+    )
+    DicomTextField(
+        value = port.toString(),
+        onValueChange = { text ->
+            if (!locked) {
+                onPortChange(text.filter { it.isDigit() }.toIntOrNull() ?: port)
+            }
+        },
+        label = "DIMSE port",
+        enabled = !locked,
+    )
+    DicomTextField(
+        value = calledAeTitle,
+        onValueChange = { if (!locked) onCalledChange(it) },
+        label = "Called AE Title",
+        enabled = !locked,
+    )
+}
+
+@Composable
+private fun TlsSwitchRow(
+    enabledLabel: String,
+    disabledLabel: String,
+    checked: Boolean,
+    locked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (checked) enabledLabel else disabledLabel,
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = { if (!locked) onCheckedChange(it) },
+            enabled = !locked,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = DicomColors.Forest,
+                checkedThumbColor = DicomColors.White,
+                uncheckedTrackColor = DicomColors.Hairline,
+                uncheckedThumbColor = DicomColors.Slate500,
+            ),
         )
     }
 }

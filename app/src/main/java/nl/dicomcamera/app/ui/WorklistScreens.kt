@@ -90,8 +90,10 @@ fun WorklistScreen(
     var items by remember { mutableStateOf<List<WorklistEntry>>(emptyList()) }
     var status by remember {
         mutableStateOf(
-            if (endpoint.transportMode == TransportMode.DICOMWEB) {
-                "MWL is DIMSE-only — uses DIMSE AE if host/AE configured"
+            if (endpoint.hasDedicatedMwl()) {
+                "Query today's worklist (dedicated MWL AE)"
+            } else if (endpoint.transportMode == TransportMode.DICOMWEB) {
+                "MWL is DIMSE-only — uses archive DIMSE if host/AE configured"
             } else {
                 "Query today's worklist"
             },

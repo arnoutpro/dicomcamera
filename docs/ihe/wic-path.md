@@ -16,7 +16,7 @@ Optional alignment path when the site prefers DICOMweb over DIMSE for capture de
 1. Set managed config / settings: `pacs_transport=DICOMWEB`
 2. Set `pacs_dicomweb_url` to the archive root (e.g. `https://pacs.example/dicom-web`)
 3. Prefer HTTPS; install private CA via MDM so TLS trust matches hospital PKI
-4. Keep DIMSE AE fields populated if MWL is still required alongside WIC store
+4. Set a dedicated MWL DIMSE destination if the worklist SCP is a different AE than the archive; otherwise leave MWL empty to reuse archive DIMSE
 
 ## Validation
 

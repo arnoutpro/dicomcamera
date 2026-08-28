@@ -46,7 +46,7 @@ References: `docs/adr/0001-dicom-toolkit-dcm4che.md`, `docs/adr/0002-dicom-video
          PACS / VNA / MWL SCP          DICOMweb Image Manager
 ```
 
-One logical Application Entity. Transport mode is site-configurable (`DIMSE` or `DICOMWEB`). When transport is DICOMweb, **Modality Worklist** still uses DIMSE if host/AE are configured (IHE SWF).
+One logical Application Entity. Transport mode is site-configurable (`DIMSE` or `DICOMWEB`). **Modality Worklist** is always DIMSE (IHE SWF) and uses a dedicated MWL destination when configured; otherwise it falls back to the archive DIMSE node.
 
 ---
 
@@ -159,7 +159,7 @@ Bearer / OAuth / Basic auth for DICOMweb are **not** implemented in this version
 
 ### 2.6 SOP-specific conformance — MWL / Query SCU
 
-- MWL is DIMSE-only.  
+- MWL is DIMSE-only. C-FIND targets the dedicated MWL destination when configured; otherwise the archive DIMSE node.  
 - Study FIND supports append-to-existing-exam.  
 - No C-MOVE/C-GET of prior images to the device.
 
@@ -172,7 +172,7 @@ Bearer / OAuth / Basic auth for DICOMweb are **not** implemented in this version
 | Physical | Device Wi-Fi / cellular as provided by the Android OS and hospital network |
 | TCP/IP | IPv4 (as configured on device) |
 | DICOM Upper Layer | dcm4che 5.31.x stack |
-| Configuration | In-app Settings and/or Android Managed Configurations (host, port, AE Titles, TLS, DICOMweb URL, transport mode) |
+| Configuration | In-app Settings and/or Android Managed Configurations (archive DIMSE host/port/AE, optional dedicated MWL DIMSE destination, TLS, DICOMweb URL, transport mode) |
 
 ---
 
@@ -222,7 +222,8 @@ Person Names use DICOM PN (`FAMILY^GIVEN`). UI may display a humanised form; sto
 2. Accept Storage SOP Classes: VL Photographic + Video Photographic (+ SC if testing legacy).  
 3. Accept transfer syntaxes JPEG Baseline and MPEG4HP41.  
 4. For Orthanc worklists: enable Worklists plugin; allow FIND from unknown AEs or register the device AE.  
-5. For DICOMweb: publish QIDO/STOW root; ensure STOW accepts encapsulated JPEG / MPEG-4 instances.
+5. For DICOMweb: publish QIDO/STOW root; ensure STOW accepts encapsulated JPEG / MPEG-4 instances.  
+6. If the MWL SCP is a different AE than the archive, set `mwl_host` / `mwl_port` / `mwl_called_aet`. If omitted, MWL uses the archive DIMSE node.
 
 ### C — Known limitations / validation status
 

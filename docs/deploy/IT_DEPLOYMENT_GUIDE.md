@@ -39,15 +39,35 @@ Restrictions schema: `app/src/main/res/xml/app_restrictions.xml`
 | `mwl_port` | `11112` |
 | `mwl_called_aet` | `MWLSCP` |
 | `mwl_use_tls` | `true` |
+| `fhir_enabled` | `true` |
+| `fhir_base_url` | `https://fhir.hospital.local/fhir` |
+| `fhir_bearer_token` | (optional) |
+| `hl7_enabled` | `true` |
+| `hl7_base_url` | `https://ehr-gw.hospital.local/hl7` |
+| `hl7_bearer_token` | (optional) |
+| `identity_lookup_mode` | `FHIR_THEN_HL7` / `HL7_THEN_FHIR` / `FHIR_ONLY` / `HL7_ONLY` |
 
 When restrictions are present, the app treats settings as **MDM-managed** (UI read-only).
 
 Archive DIMSE (`pacs_host` / `pacs_port` / `pacs_called_aet`) is used for **C-STORE**, **C-ECHO**, and **Study FIND**. Modality Worklist is a **separate** DIMSE destination (`mwl_*`). If `mwl_host` and `mwl_called_aet` are left empty, MWL C-FIND falls back to the archive DIMSE node (typical for lab Orthanc). A partially filled MWL destination does not fall back — fill host, port, and called AE together.
 
+## EHR identity (lab)
+
+Local harnesses (HAPI FHIR + HL7 façade mock): see `lab/README.md`.
+
+| App setting | Emulator | Physical device on LAN |
+|---|---|---|
+| FHIR base URL | `http://10.0.2.2:8080/fhir` | `http://<lab-host>:8080/fhir` |
+| HL7 base URL | `http://10.0.2.2:8090` | `http://<lab-host>:8090` |
+
+Sample IDs: FHIR `999888777`, HL7 `123456789`.
+
+Cleartext HTTP EHR URLs work only on the **dev** flavor. Staging/release block cleartext; pilots should use HTTPS façades.
+
 ## Flavors
 
-- **dev** — emulator defaults (`10.0.2.2` Orthanc)
-- **staging** — empty defaults; expect MDM or manual IT entry
+- **dev** — emulator defaults (`10.0.2.2` Orthanc); cleartext HTTP allowed for lab DICOMweb / EHR
+- **staging** — empty defaults; expect MDM or manual IT entry; cleartext HTTP blocked
 
 ## Audit / SIEM
 
@@ -62,6 +82,7 @@ Archive DIMSE (`pacs_host` / `pacs_port` / `pacs_called_aet`) is used for **C-ST
 3. Append via Study find / QIDO keeps Study Instance UID
 4. After success, device staging folder empty
 5. Forced failure → pending queue → retry succeeds
+6. Manual Patient ID → Look up in EHR (FHIR and/or HL7) → demographics stamped on stored DICOM
 
 ## Second PACS
 

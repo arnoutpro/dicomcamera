@@ -1,0 +1,38 @@
+[
+  {
+    "resourceType": "Patient",
+    "identifier": [
+      {
+        "system": "http://hospital.example/mrn",
+        "value": "999888777"
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": "de Vries",
+        "given": ["Jan"]
+      }
+    ],
+    "birthDate": "1975-06-01",
+    "gender": "male"
+  },
+  {
+    "resourceType": "Patient",
+    "identifier": [
+      {
+        "system": "http://hospital.example/mrn",
+        "value": "444333222"
+      }
+    ],
+    "name": [
+      {
+        "use": "official",
+        "family": "Visser",
+        "given": ["Sara", "Maria"]
+      }
+    ],
+    "birthDate": "1992-11-08",
+    "gender": "female"
+  }
+]

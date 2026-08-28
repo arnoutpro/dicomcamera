@@ -148,6 +148,7 @@ docker compose up -d --build
 | HL7 façade mock | `8090` | Patient `123456789` |
 
 Emulator Settings → EHR: `http://10.0.2.2:8080/fhir` and `http://10.0.2.2:8090`.  
+Use a **dev** flavor APK for those HTTP URLs (staging blocks cleartext).  
 Physical device: use your lab host LAN IP.
 
 Default DIMSE (dev flavor): host `10.0.2.2`, port `4242`, called AE `ORTHANC`, calling AE `DICOMCAM`.

@@ -48,3 +48,6 @@ Or list / wrapped:
 Worklist tab → enter Patient ID → **Look up in EHR** → fields fill → continue to capture.
 
 Lab mock (no MLLP): `lab/hl7-facade` on port `8090`. See `lab/README.md`.
+
+**Mirth Connect / Rhapsody:** implement this same HTTPS JSON façade; keep DICOM **store** on Orthanc/PACS (not Mirth).  
+See [`MIRTH_CHANNELS.md`](MIRTH_CHANNELS.md) and transformer samples in [`lab/mirth/`](../../lab/mirth/).

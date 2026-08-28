@@ -68,4 +68,26 @@ class Hl7PatientDirectoryTest {
             assertThat(e.message).contains("not configured")
         }
     }
+
+    @Test
+    fun http_error_omits_response_body_from_exception() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(502)
+                .setBody("""{"patientId":"SYNTH-LEAK","patientName":"DOE^JANE"}"""),
+        )
+        val directory = Hl7PatientDirectory(
+            configProvider = {
+                Hl7FacadeConfig(enabled = true, baseUrl = server.url("/hl7").toString().trimEnd('/'))
+            },
+        )
+        try {
+            directory.findPatients(PatientQuery(patientId = "1"))
+            throw AssertionError("expected failure")
+        } catch (e: IllegalStateException) {
+            assertThat(e.message).contains("HL7 façade HTTP 502")
+            assertThat(e.message).doesNotContain("SYNTH-LEAK")
+            assertThat(e.message).doesNotContain("DOE^JANE")
+        }
+    }
 }

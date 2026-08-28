@@ -2,6 +2,7 @@ package nl.dicomcamera.app.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -10,6 +11,7 @@ import androidx.security.crypto.MasterKey
  * Tokens are never written to the plaintext DataStore preferences file.
  */
 internal object EncryptedTokenStore {
+    private const val TAG = "EncryptedTokenStore"
     private const val PREFS_NAME = "dicomcamera_secrets"
     private const val KEY_HL7 = "hl7_bearer_token"
     private const val KEY_FHIR = "fhir_bearer_token"
@@ -26,6 +28,18 @@ internal object EncryptedTokenStore {
     }
 
     private fun prefs(context: Context): SharedPreferences {
+        return try {
+            createPrefs(context)
+        } catch (e: Exception) {
+            // Keystore/keyset mismatch (e.g. AEADBadTagException) would otherwise crash
+            // Settings on every launch. Wipe the corrupt secrets file and recreate empty.
+            Log.e(TAG, "Encrypted token store unreadable; resetting", e)
+            runCatching { context.deleteSharedPreferences(PREFS_NAME) }
+            createPrefs(context)
+        }
+    }
+
+    private fun createPrefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()

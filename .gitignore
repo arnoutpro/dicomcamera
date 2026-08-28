@@ -16,3 +16,4 @@
 .kotlin/
 lab/orthanc-storage/
 lab/orthanc-db/
+__pycache__/

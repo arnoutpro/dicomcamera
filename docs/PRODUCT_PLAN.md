@@ -259,7 +259,7 @@ Treat as handling **bijzondere persoonsgegevens / health data** from day one. Ta
 
 **Goal:** Resolve patient/order details from the EPD on the fly; pilot-ready for Dutch/EU IT, security, and privacy review.
 
-**Status:** In progress on branch `cursor/phase-5-ehr-identity-cbc8` — FHIR + HL7 composite lookup, privacy UX, compliance pack drafts.
+**Status:** FHIR + HL7 composite lookup is in the app. Lab harnesses (HAPI FHIR + HL7 façade mock) live in `lab/` so Manual → Look up in EHR can be demoed against local HTTP. Compliance pack drafts remain in `docs/compliance/`.
 
 **Identity (planned capability — not an afterthought)**
 

@@ -1,0 +1,16 @@
+{
+  "patients": [
+    {
+      "patientId": "123456789",
+      "patientName": "JANSEN^ANNE",
+      "birthDate": "19800315",
+      "sex": "F"
+    },
+    {
+      "patientId": "555666777",
+      "patientName": "DE BOER^KEES",
+      "birthDate": "19651120",
+      "sex": "M"
+    }
+  ]
+}

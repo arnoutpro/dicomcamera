@@ -45,4 +45,6 @@ Or list / wrapped:
 
 ## App usage
 
-Worklist tab → enter Patient ID → **Query HL7 demographics** → fields fill → continue to capture.
+Worklist tab → enter Patient ID → **Look up in EHR** → fields fill → continue to capture.
+
+Lab mock (no MLLP): `lab/hl7-facade` on port `8090`. See `lab/README.md`.

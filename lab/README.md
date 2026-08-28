@@ -86,3 +86,10 @@ Re-seed FHIR after wiping the HAPI container:
 ```bash
 docker compose run --rm fhir-seed
 ```
+
+## Mirth Connect (hospital façade)
+
+Imaging **store stays Orthanc** (phone → C-STORE). For a real HL7 demographics façade on Mirth (same JSON contract as `hl7-facade`), see:
+
+- [`docs/deploy/MIRTH_CHANNELS.md`](../docs/deploy/MIRTH_CHANNELS.md)  
+- Transformer samples: [`mirth/`](mirth/)

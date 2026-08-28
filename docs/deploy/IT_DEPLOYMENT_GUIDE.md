@@ -64,6 +64,8 @@ Sample IDs: FHIR `999888777`, HL7 `123456789`.
 
 Cleartext HTTP EHR URLs work only on the **dev** flavor. Staging/release block cleartext; pilots should use HTTPS façades.
 
+**Mirth / Rhapsody:** implement the HL7 HTTPS façade; keep DICOM C-STORE on Orthanc/PACS. See [`MIRTH_CHANNELS.md`](MIRTH_CHANNELS.md).
+
 ## Flavors
 
 - **dev** — emulator defaults (`10.0.2.2` Orthanc); cleartext HTTP allowed for lab DICOMweb / EHR

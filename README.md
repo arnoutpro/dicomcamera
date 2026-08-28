@@ -115,6 +115,7 @@ Modules: `:app` · `:dicom` (dcm4che) · `:identity` (FHIR/HL7 clients).
 | Product roadmap & phases | [`docs/PRODUCT_PLAN.md`](docs/PRODUCT_PLAN.md) |
 | Hospital IT / MDM | [`docs/deploy/IT_DEPLOYMENT_GUIDE.md`](docs/deploy/IT_DEPLOYMENT_GUIDE.md) |
 | HL7 façade contract | [`docs/deploy/HL7_FACADE_CONTRACT.md`](docs/deploy/HL7_FACADE_CONTRACT.md) |
+| Mirth channels (HL7 façade; Orthanc keeps store) | [`docs/deploy/MIRTH_CHANNELS.md`](docs/deploy/MIRTH_CHANNELS.md) |
 | IHE SWF / WIC notes | [`docs/ihe/`](docs/ihe/) |
 | NL/EU compliance pack (drafts) | [`docs/compliance/PHASE5_COMPLIANCE_PACK.md`](docs/compliance/PHASE5_COMPLIANCE_PACK.md) |
 | Lab Orthanc + EHR harnesses | [`lab/README.md`](lab/README.md) |

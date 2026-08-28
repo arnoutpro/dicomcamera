@@ -20,6 +20,10 @@ object ManagedConfig {
     const val KEY_CALLING_AET = "pacs_calling_aet"
     const val KEY_USE_TLS = "pacs_use_tls"
     const val KEY_DICOMWEB_URL = "pacs_dicomweb_url"
+    const val KEY_MWL_HOST = "mwl_host"
+    const val KEY_MWL_PORT = "mwl_port"
+    const val KEY_MWL_CALLED_AET = "mwl_called_aet"
+    const val KEY_MWL_USE_TLS = "mwl_use_tls"
     const val KEY_MODALITY = "modality_code"
     const val KEY_STATION = "station_name"
     const val KEY_HL7_ENABLED = "hl7_enabled"
@@ -39,6 +43,10 @@ object ManagedConfig {
         KEY_CALLING_AET,
         KEY_USE_TLS,
         KEY_DICOMWEB_URL,
+        KEY_MWL_HOST,
+        KEY_MWL_PORT,
+        KEY_MWL_CALLED_AET,
+        KEY_MWL_USE_TLS,
         KEY_MODALITY,
         KEY_STATION,
         KEY_HL7_ENABLED,
@@ -110,6 +118,19 @@ object ManagedConfig {
         }
         bundle.getString(KEY_DICOMWEB_URL)?.takeIf { it.isNotBlank() }?.let {
             next = next.copy(dicomWebBaseUrl = it)
+        }
+        bundle.getString(KEY_MWL_HOST)?.takeIf { it.isNotBlank() }?.let {
+            next = next.copy(mwlHost = it)
+        }
+        if (bundle.containsKey(KEY_MWL_PORT)) {
+            val port = bundle.getInt(KEY_MWL_PORT, local.mwlPort)
+            if (port in 1..65535) next = next.copy(mwlPort = port)
+        }
+        bundle.getString(KEY_MWL_CALLED_AET)?.takeIf { it.isNotBlank() }?.let {
+            next = next.copy(mwlCalledAeTitle = it)
+        }
+        if (bundle.containsKey(KEY_MWL_USE_TLS)) {
+            next = next.copy(mwlUseTls = bundle.getBoolean(KEY_MWL_USE_TLS))
         }
         bundle.getString(KEY_MODALITY)?.takeIf { it.isNotBlank() }?.let {
             next = next.copy(modality = it.trim().uppercase())

@@ -13,7 +13,7 @@ Hospital PACS vary: classic DIMSE AE titles remain common; many VNAs and Orthanc
 - Expose **TransportMode**: `DIMSE` | `DICOMWEB` in settings and MDM managed config
 - **DIMSE:** C-ECHO, C-STORE, MWL C-FIND, Study Root C-FIND (existing PacsClient)
 - **DICOMweb:** HTTP ping, QIDO-RS studies, STOW-RS store (`DicomWebClient`)
-- **MWL** remains DIMSE-only (IHE SWF). In DICOMweb mode, worklist uses DIMSE fallback when host/AE are still configured; otherwise show a clear error and prefer Append via QIDO
+- **MWL** remains DIMSE-only (IHE SWF) against a **dedicated MWL destination** (host/port/called AE). If those fields are empty, worklist falls back to the archive DIMSE node (lab Orthanc / existing MDM). In DICOMweb store mode, configure the MWL destination (or keep archive DIMSE filled as fallback); otherwise show a clear error and prefer Append via QIDO
 - Unified entry point: `PacsGateway`
 
 ## Consequences

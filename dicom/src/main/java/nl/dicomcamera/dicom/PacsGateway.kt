@@ -5,17 +5,24 @@ import java.io.File
 /**
  * Unified PACS operations over DIMSE or DICOMweb.
  *
- * MWL C-FIND remains DIMSE-only (IHE SWF); when transport is DICOMweb,
- * [findWorklist] returns a clear failure unless a DIMSE node is also configured
- * via [dimseFallback].
+ * MWL C-FIND remains DIMSE-only (IHE SWF) and uses the dedicated MWL
+ * destination on [PacsEndpoint] when set. Otherwise it falls back to the
+ * archive DIMSE node (lab Orthanc / existing MDM).
  */
 class PacsGateway(
     private val endpoint: PacsEndpoint,
-    private val dimseFallback: DicomNode? = null,
 ) : AutoCloseable {
     fun ping(): EchoResult = when (endpoint.transportMode) {
         TransportMode.DIMSE -> PacsClient(endpoint.toNode()).use { it.echo() }
         TransportMode.DICOMWEB -> DicomWebClient(endpoint.dicomWebBaseUrl).use { it.ping() }
+    }
+
+    fun pingMwl(): EchoResult {
+        val node = endpoint.resolveMwlNode()
+            ?: return EchoResult.Failed(
+                "Modality Worklist requires a DIMSE destination. Set MWL host/AE, or fill archive DIMSE as fallback.",
+            )
+        return PacsClient(node).use { it.echo() }
     }
 
     fun store(dicomFile: File): StoreResult = when (endpoint.transportMode) {
@@ -29,13 +36,11 @@ class PacsGateway(
     }
 
     fun findWorklist(query: WorklistQuery): FindResult<WorklistEntry> {
-        val node = when (endpoint.transportMode) {
-            TransportMode.DIMSE -> endpoint.toNode()
-            TransportMode.DICOMWEB -> dimseFallback
-                ?: return FindResult.Failed(
-                    "Modality Worklist requires DIMSE. Configure DIMSE AE or use Append (QIDO-RS).",
-                )
-        }
+        val node = endpoint.resolveMwlNode()
+            ?: return FindResult.Failed(
+                "Modality Worklist requires DIMSE. Configure the MWL destination " +
+                    "(or archive DIMSE as fallback), or use Append (QIDO-RS).",
+            )
         return PacsClient(node).use { it.findWorklist(query) }
     }
 
@@ -44,11 +49,6 @@ class PacsGateway(
     }
 
     companion object {
-        fun fromEndpoint(endpoint: PacsEndpoint): PacsGateway {
-            val fallback = endpoint.takeIf {
-                it.host.isNotBlank() && it.calledAeTitle.isNotBlank()
-            }?.toNode()
-            return PacsGateway(endpoint, dimseFallback = fallback)
-        }
+        fun fromEndpoint(endpoint: PacsEndpoint): PacsGateway = PacsGateway(endpoint)
     }
 }

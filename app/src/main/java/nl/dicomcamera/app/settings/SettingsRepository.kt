@@ -29,7 +29,7 @@ data class PacsSettings(
     val stationName: String = "",
     /** DIMSE vs DICOMweb (Phase 4 dual stack). */
     val transportMode: TransportMode = TransportMode.DIMSE,
-    /** Remote PACS host for DIMSE (also MWL fallback when using DICOMweb). */
+    /** Remote archive host for DIMSE C-STORE / C-ECHO / Study FIND. */
     val host: String = BuildConfig.DEFAULT_PACS_HOST,
     val port: Int = BuildConfig.DEFAULT_PACS_PORT,
     /** Remote / called AE Title (archive). */
@@ -37,6 +37,14 @@ data class PacsSettings(
     val useTls: Boolean = false,
     /** DICOMweb root URL (QIDO-RS / STOW-RS). */
     val dicomWebBaseUrl: String = BuildConfig.DEFAULT_DICOMWEB_URL,
+    /**
+     * Dedicated MWL SCP. Empty host + called AE → fall back to archive DIMSE.
+     * Calling AE is always the Local AE ([callingAeTitle]).
+     */
+    val mwlHost: String = "",
+    val mwlPort: Int = 11112,
+    val mwlCalledAeTitle: String = "",
+    val mwlUseTls: Boolean = false,
     /** HL7 demographics façade. */
     val hl7Enabled: Boolean = false,
     val hl7BaseUrl: String = "",
@@ -73,6 +81,19 @@ data class PacsSettings(
         callingAeTitle = callingAeTitle.trim(),
         useTls = useTls,
         dicomWebBaseUrl = dicomWebBaseUrl.trim(),
+        mwlHost = mwlHost.trim(),
+        mwlPort = mwlPort,
+        mwlCalledAeTitle = mwlCalledAeTitle.trim(),
+        mwlUseTls = mwlUseTls,
+    )
+
+    fun isMwlConfigured(): Boolean = toEndpoint().isMwlConfigured()
+
+    fun copyArchiveDimseToMwl(): PacsSettings = copy(
+        mwlHost = host.trim(),
+        mwlPort = port,
+        mwlCalledAeTitle = calledAeTitle.trim(),
+        mwlUseTls = useTls,
     )
 
     fun toHl7Config(): Hl7FacadeConfig = Hl7FacadeConfig(
@@ -99,24 +120,29 @@ data class PacsSettings(
         ).joinToString(" · ").ifBlank { "Not set" }
 
     fun transportSummary(): String = when (transportMode) {
-        TransportMode.DIMSE -> "DIMSE (C-STORE / MWL)"
+        TransportMode.DIMSE -> "DIMSE (C-STORE / C-FIND)"
         TransportMode.DICOMWEB -> "DICOMweb (STOW / QIDO)"
     }
 
     fun remoteSummary(): String =
         when (transportMode) {
-            TransportMode.DIMSE -> when {
-                host.isBlank() -> "Not configured"
-                else -> listOf(
-                    host.trim(),
-                    port.toString(),
-                    calledAeTitle.trim().ifBlank { "AE?" },
-                    if (useTls) "TLS" else "plain",
-                ).joinToString(" · ")
-            }
+            TransportMode.DIMSE -> formatDimseSummary(host, port, calledAeTitle, useTls)
             TransportMode.DICOMWEB ->
                 dicomWebBaseUrl.trim().ifBlank { "DICOMweb URL not set" }
         }
+
+    fun mwlSummary(): String {
+        val endpoint = toEndpoint()
+        return when {
+            endpoint.hasDedicatedMwl() && endpoint.toMwlNode() != null ->
+                formatDimseSummary(mwlHost, mwlPort, mwlCalledAeTitle, mwlUseTls)
+            endpoint.hasDedicatedMwl() ->
+                "MWL incomplete — fill host, port, and called AE"
+            endpoint.resolveMwlNode() != null ->
+                "Uses archive DIMSE · ${formatDimseSummary(host, port, calledAeTitle, useTls)}"
+            else -> "Not configured"
+        }
+    }
 
     fun hl7Summary(): String = toHl7Config().summary()
 
@@ -142,6 +168,21 @@ data class PacsSettings(
         if (loggingEnabled) "Enabled — export from Logging" else "Off (manual activation)"
 }
 
+private fun formatDimseSummary(
+    host: String,
+    port: Int,
+    calledAeTitle: String,
+    useTls: Boolean,
+): String = when {
+    host.isBlank() -> "Not configured"
+    else -> listOf(
+        host.trim(),
+        port.toString(),
+        calledAeTitle.trim().ifBlank { "AE?" },
+        if (useTls) "TLS" else "plain",
+    ).joinToString(" · ")
+}
+
 class SettingsRepository(private val context: Context) {
     private object Keys {
         val transport = stringPreferencesKey("pacs_transport")
@@ -151,6 +192,10 @@ class SettingsRepository(private val context: Context) {
         val calling = stringPreferencesKey("pacs_calling_aet")
         val tls = booleanPreferencesKey("pacs_use_tls")
         val webUrl = stringPreferencesKey("pacs_dicomweb_url")
+        val mwlHost = stringPreferencesKey("mwl_host")
+        val mwlPort = intPreferencesKey("mwl_port")
+        val mwlCalled = stringPreferencesKey("mwl_called_aet")
+        val mwlTls = booleanPreferencesKey("mwl_use_tls")
         val modality = stringPreferencesKey("modality_code")
         val station = stringPreferencesKey("station_name")
         val hl7Enabled = booleanPreferencesKey("hl7_enabled")
@@ -184,6 +229,10 @@ class SettingsRepository(private val context: Context) {
             calledAeTitle = prefs[Keys.called] ?: BuildConfig.DEFAULT_CALLED_AET,
             useTls = prefs[Keys.tls] ?: false,
             dicomWebBaseUrl = prefs[Keys.webUrl] ?: BuildConfig.DEFAULT_DICOMWEB_URL,
+            mwlHost = prefs[Keys.mwlHost].orEmpty(),
+            mwlPort = prefs[Keys.mwlPort] ?: 11112,
+            mwlCalledAeTitle = prefs[Keys.mwlCalled].orEmpty(),
+            mwlUseTls = prefs[Keys.mwlTls] ?: false,
             hl7Enabled = prefs[Keys.hl7Enabled] ?: false,
             hl7BaseUrl = prefs[Keys.hl7Url].orEmpty(),
             hl7BearerToken = hl7Token,
@@ -238,6 +287,10 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.called] = settings.calledAeTitle.trim()
             prefs[Keys.tls] = settings.useTls
             prefs[Keys.webUrl] = settings.dicomWebBaseUrl.trim()
+            prefs[Keys.mwlHost] = settings.mwlHost.trim()
+            prefs[Keys.mwlPort] = settings.mwlPort
+            prefs[Keys.mwlCalled] = settings.mwlCalledAeTitle.trim()
+            prefs[Keys.mwlTls] = settings.mwlUseTls
             prefs[Keys.hl7Enabled] = settings.hl7Enabled
             prefs[Keys.hl7Url] = settings.hl7BaseUrl.trim()
             prefs.remove(Keys.hl7Token)

@@ -127,10 +127,7 @@ class PendingStoreQueue(
     fun discard(id: String): Boolean {
         val dir = File(rootDir, id)
         if (!dir.exists()) return false
-        dir.walkBottomUp().forEach { file ->
-            if (file.isFile) staging.wipe(file)
-            else file.delete()
-        }
+        wipePendingDirectory(dir)
         return !dir.exists()
     }
 
@@ -153,7 +150,9 @@ class PendingStoreQueue(
         var removed = 0
         rootDir.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
             val item = readItem(dir) ?: run {
-                dir.deleteRecursively()
+                // Unreadable / partial dirs may still hold raw.jpg + meta (PHI).
+                // Never use plain deleteRecursively — match discard()'s secure wipe.
+                wipePendingDirectory(dir)
                 removed++
                 return@forEach
             }
@@ -162,6 +161,14 @@ class PendingStoreQueue(
             }
         }
         return removed
+    }
+
+    /** Securely overwrite file contents then remove the pending entry directory. */
+    private fun wipePendingDirectory(dir: File) {
+        dir.walkBottomUp().forEach { file ->
+            if (file.isFile) staging.wipe(file)
+            else file.delete()
+        }
     }
 
     private fun readItem(dir: File): PendingItem? {

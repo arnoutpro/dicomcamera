@@ -56,4 +56,30 @@ class PendingStoreQueueTest {
         assertThat(groups[0].patientId).isEqualTo("DEMO-1001")
         assertThat(groups[0].instanceCount).isEqualTo(1)
     }
+
+    @Test
+    fun purgeExpired_secureWipesPartialDirWithoutDicom() {
+        // Simulates discard that wiped instance.dcm but left raw + meta (PHI).
+        val staging = SecureStaging(tmp.newFolder("staging"))
+        val root = tmp.newFolder("pending")
+        val queue = PendingStoreQueue(root, staging)
+        val orphan = File(root, "orphan-partial").also { check(it.mkdirs()) }
+        val raw = File(orphan, "raw.jpg").also {
+            it.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        }
+        File(orphan, "meta.txt").writeText(
+            """
+            patientId=SYNTH-ORPHAN
+            patientName=TEST^USER
+            studyInstanceUid=1.2.3
+            error=partial wipe
+            createdAt=${System.currentTimeMillis()}
+            """.trimIndent() + "\n",
+        )
+        assertThat(raw.exists()).isTrue()
+        assertThat(queue.purgeExpired()).isEqualTo(1)
+        assertThat(orphan.exists()).isFalse()
+        assertThat(raw.exists()).isFalse()
+        assertThat(queue.list()).isEmpty()
+    }
 }

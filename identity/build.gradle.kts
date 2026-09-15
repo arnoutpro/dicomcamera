@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "nl.dicomcamera.identity"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 26

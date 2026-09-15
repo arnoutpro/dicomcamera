@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "nl.dicomcamera.app"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "nl.dicomcamera.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 20
         versionName = "0.6.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

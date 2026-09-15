@@ -48,14 +48,6 @@ Clinical photos still end up in insecure channels (chat apps, personal cameras, 
 
 **Arnout.pro DICOM Camera** is built for that workflow — Android-first, EU/NL compliance-aware, MDM-deployable.
 
-| | Typical photo apps | This project |
-|---|---|---|
-| Archive | Gallery / cloud | **PACS / VNA only** |
-| Identity | Manual typing | **MWL · Study query · FHIR · HL7 façade** |
-| After send | Copies remain | **Wipe after PACS ACK** |
-| PACS lock-in | Often vendor-tied | **DIMSE + DICOMweb standards** |
-| Platform | Mixed | **Android (MVP)** |
-
 ---
 
 ## Features

@@ -232,6 +232,11 @@ object SystemCameraCapture {
     /**
      * Wipe leftover EXTRA_OUTPUT files under app-private Pictures/capture
      * (crash / process kill between camera return and finalize).
+     *
+     * Also revokes any persistent [Context.grantUriPermission] grants to camera
+     * packages for those URIs — Intent FLAG_GRANT_* alone is temporary, but we
+     * also call grantUriPermission so a crash before finalize would otherwise
+     * leave the camera app able to re-read clinical pixels until wipe.
      */
     fun purgeLeftoverOutputs(context: Context): Int {
         val extDir = File(
@@ -241,12 +246,32 @@ object SystemCameraCapture {
         if (!extDir.isDirectory) return 0
         var removed = 0
         extDir.listFiles()?.filter { it.isFile }?.forEach { file ->
+            revokeGrantsForCaptureFile(context, file)
             when (secureDelete(file)) {
                 is WipeResult.Wiped, is WipeResult.AlreadyGone -> removed++
                 is WipeResult.Failed -> if (file.delete()) removed++
             }
         }
         return removed
+    }
+
+    private fun revokeGrantsForCaptureFile(context: Context, file: File) {
+        val uri = runCatching {
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+        }.getOrNull() ?: return
+        val flags =
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val packages = linkedSetOf<String>()
+        OEM_CAMERA_PACKAGES.forEach { packages += it }
+        baseIntent(true).resolveActivity(context.packageManager)?.packageName?.let { packages += it }
+        baseIntent(false).resolveActivity(context.packageManager)?.packageName?.let { packages += it }
+        packages.forEach { pkg ->
+            runCatching { context.revokeUriPermission(pkg, uri, flags) }
+        }
     }
 
     private fun wipeOutput(context: Context, pending: Pending) {

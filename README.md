@@ -4,6 +4,36 @@
   <img src="branding/readme-hero-1280x320.png" alt="Arnout.pro DICOM Camera" width="100%" />
 </p>
 
+---
+
+## Features
+
+### Capture & encode
+- CameraX **photo** and **video** in one exam session  
+- **VL Photographic Image Storage** (JPEG Baseline)  
+- **Video Photographic Image Storage** (MPEG-4 AVC/H.264 / `MPEG4HP41`)  
+- Session tray, review, batch store, pending retry queue  
+
+### Identity & workflow
+- **Modality Worklist** (DIMSE C-FIND) with date picker & filters  
+- **Append to existing study** (Study Root C-FIND / QIDO-RS)  
+- **Manual / emergency** path when no order exists  
+- **FHIR R4 Patient** lookup + **HL7 HTTPS façade** demographics  
+- Demo patients for offline exploration  
+
+### Integration
+- **DIMSE:** archive C-ECHO / C-STORE / Study FIND, plus a separate MWL C-FIND destination  
+- **DICOMweb:** QIDO-RS + STOW-RS (selectable per site)  
+- Android **Managed Configurations** (MDM) for AE Titles, hosts, EHR endpoints  
+- **ATNA-style** audit export (system save dialog)  
+
+### Privacy by design
+- App-private staging only — **never** the system gallery  
+- Wipe local pixels after successful store  
+- Clear lab-only banner + Settings → About (purpose, AVG, MDR/DPIA)  
+
+---
+
 <p align="center">
   <strong>Android clinical camera for hospitals</strong><br/>
   Capture photos &amp; video → bind to the right patient/order → store as DICOM to any standards-compliant PACS → wipe the device.
@@ -47,42 +77,6 @@ Clinical photos still end up in insecure channels (chat apps, personal cameras, 
 3. Leaves **no durable PHI** on the phone after a successful store  
 
 **Arnout.pro DICOM Camera** is built for that workflow — Android-first, EU/NL compliance-aware, MDM-deployable.
-
-| | Typical photo apps | This project |
-|---|---|---|
-| Archive | Gallery / cloud | **PACS / VNA only** |
-| Identity | Manual typing | **MWL · Study query · FHIR · HL7 façade** |
-| After send | Copies remain | **Wipe after PACS ACK** |
-| PACS lock-in | Often vendor-tied | **DIMSE + DICOMweb standards** |
-| Platform | Mixed | **Android (MVP)** |
-
----
-
-## Features
-
-### Capture & encode
-- CameraX **photo** and **video** in one exam session  
-- **VL Photographic Image Storage** (JPEG Baseline)  
-- **Video Photographic Image Storage** (MPEG-4 AVC/H.264 / `MPEG4HP41`)  
-- Session tray, review, batch store, pending retry queue  
-
-### Identity & workflow
-- **Modality Worklist** (DIMSE C-FIND) with date picker & filters  
-- **Append to existing study** (Study Root C-FIND / QIDO-RS)  
-- **Manual / emergency** path when no order exists  
-- **FHIR R4 Patient** lookup + **HL7 HTTPS façade** demographics  
-- Demo patients for offline exploration  
-
-### Integration
-- **DIMSE:** archive C-ECHO / C-STORE / Study FIND, plus a separate MWL C-FIND destination  
-- **DICOMweb:** QIDO-RS + STOW-RS (selectable per site)  
-- Android **Managed Configurations** (MDM) for AE Titles, hosts, EHR endpoints  
-- **ATNA-style** audit export (system save dialog)  
-
-### Privacy by design
-- App-private staging only — **never** the system gallery  
-- Wipe local pixels after successful store  
-- Clear lab-only banner + Settings → About (purpose, AVG, MDR/DPIA)  
 
 ---
 

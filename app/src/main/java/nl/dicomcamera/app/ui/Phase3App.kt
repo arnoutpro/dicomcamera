@@ -202,10 +202,12 @@ fun Phase3App() {
             settingsRepo.migrateLegacyTokens()
             staging.purgeOrphans()
             nl.dicomcamera.app.capture.SystemCameraCapture.purgeLeftoverOutputs(context)
+            localArchive.purgeOrphans()
             archivedStore.purgeExpired()
             pendingQueue.purgeExpired()
         }
         archivedRecords = archivedStore.list()
+        readyStudies = localArchive.list()
         pendingItems = pendingQueue.list()
     }
 

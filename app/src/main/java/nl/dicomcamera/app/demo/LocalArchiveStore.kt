@@ -125,13 +125,33 @@ class LocalArchiveStore(
             ?.sortedByDescending { it.createdAtEpochMs }
             .orEmpty()
 
+    /**
+     * Crash / partial-write recovery: secure-wipe archive directories that cannot be listed
+     * (missing or corrupt meta, or no remaining photos). Readable ready-to-send studies are
+     * left alone until the operator Discard/Send — no silent TTL.
+     */
+    fun purgeOrphans(): Int {
+        var removed = 0
+        rootDir.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
+            if (read(dir) == null) {
+                wipeDirectory(dir)
+                removed++
+            }
+        }
+        return removed
+    }
+
     fun discard(id: String): Boolean {
         val dir = File(rootDir, id)
         if (!dir.exists()) return false
+        wipeDirectory(dir)
+        return !dir.exists()
+    }
+
+    private fun wipeDirectory(dir: File) {
         dir.walkBottomUp().forEach { file ->
             if (file.isFile) staging.wipe(file) else file.delete()
         }
-        return !dir.exists()
     }
 
     fun markSentAndWipe(id: String) {

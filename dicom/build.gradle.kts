@@ -37,8 +37,8 @@ dependencies {
     // DICOM toolkit (Phase 0 ADR: dcm4che on JVM/Android)
     api("org.dcm4che:dcm4che-core:5.35.1")
     api("org.dcm4che:dcm4che-net:5.35.1")
-    implementation("org.slf4j:slf4j-api:2.0.18")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
+    implementation("org.slf4j:slf4j-api:2.0.19")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.19")
 
     // DICOMweb (QIDO-RS / STOW-RS)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

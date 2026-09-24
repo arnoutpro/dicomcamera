@@ -8,8 +8,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import nl.dicomcamera.app.BuildConfig
 import nl.dicomcamera.dicom.DicomNode
 import nl.dicomcamera.dicom.PacsEndpoint
@@ -211,6 +214,10 @@ class SettingsRepository(private val context: Context) {
         val loggingEnabled = booleanPreferencesKey("logging_enabled")
     }
 
+    /**
+     * Collected from Compose on the main thread; [flowOn] keeps the Keystore-backed token
+     * reads and the RestrictionsManager IPC in the mapper off it.
+     */
     val settings: Flow<PacsSettings> = context.dataStore.data.map { prefs ->
         val encryptedHl7 = EncryptedTokenStore.readHl7(context)
         val encryptedFhir = EncryptedTokenStore.readFhir(context)
@@ -246,7 +253,7 @@ class SettingsRepository(private val context: Context) {
             loggingEnabled = prefs[Keys.loggingEnabled] ?: false,
         )
         ManagedConfig.merge(context, local)
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * One-shot: move bearer tokens from plaintext DataStore into EncryptedSharedPreferences
@@ -268,9 +275,9 @@ class SettingsRepository(private val context: Context) {
     /**
      * Persist settings. Returns false when MDM owns config and local save is skipped.
      */
-    suspend fun save(settings: PacsSettings): Boolean {
+    suspend fun save(settings: PacsSettings): Boolean = withContext(Dispatchers.IO) {
         if (ManagedConfig.isManaged(context)) {
-            return false
+            return@withContext false
         }
         EncryptedTokenStore.write(
             context,
@@ -301,6 +308,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.adminLocked] = settings.adminConfigLocked
             prefs[Keys.loggingEnabled] = settings.loggingEnabled
         }
-        return true
+        true
     }
 }

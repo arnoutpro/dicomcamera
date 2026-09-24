@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- targetSdk 37: TCP to LAN hosts (PACS / MWL / EHR façade) is blocked without this
+         runtime permission. Requested at launch in Phase3App on API 37+. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -37,7 +40,12 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
             android:windowSoftInputMode="adjustResize">
+            <!-- Session state (captures, exam, pending camera output) lives in Compose
+                 `remember`. Handling these changes in-process stops a rotation, often
+                 triggered inside the landscape system camera, from recreating the
+                 activity and silently dropping the capture. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

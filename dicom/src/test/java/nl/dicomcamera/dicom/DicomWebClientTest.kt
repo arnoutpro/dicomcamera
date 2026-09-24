@@ -109,6 +109,50 @@ class DicomWebClientTest {
     }
 
     @Test
+    fun stow_409_conflict_is_failure() {
+        server.enqueue(MockResponse().setResponseCode(409).setBody("{}"))
+        val dicomFile = encodeSample("conflict.dcm")
+
+        DicomWebClient(baseUrl()).use { client ->
+            val store = client.stow(dicomFile)
+            assertThat(store).isInstanceOf(StoreResult.Failed::class.java)
+            assertThat((store as StoreResult.Failed).message).contains("STOW-RS HTTP 409")
+        }
+    }
+
+    @Test
+    fun stow_202_with_failed_sop_sequence_is_failure() {
+        val body = """
+            {"00081198":{"vr":"SQ","Value":[{
+              "00081150":{"vr":"UI","Value":["1.2.840.10008.5.1.4.1.1.77.1.4"]},
+              "00081155":{"vr":"UI","Value":["2.25.1"]},
+              "00081197":{"vr":"US","Value":[49152]}
+            }]}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(202).setBody(body))
+        val dicomFile = encodeSample("partial.dcm")
+
+        DicomWebClient(baseUrl()).use { client ->
+            val store = client.stow(dicomFile)
+            assertThat(store).isInstanceOf(StoreResult.Failed::class.java)
+            assertThat((store as StoreResult.Failed).message).contains("FailedSOPSequence")
+        }
+    }
+
+    private fun encodeSample(name: String): java.io.File {
+        val jpeg = javaClass.getResourceAsStream("/sample.jpg")!!.use { it.readBytes() }
+        val dicomFile = temp.newFile(name)
+        PhotographicImageEncoder().encodeJpegToFile(
+            jpegBytes = jpeg,
+            context = PatientStudyContext(patientId = "W1", patientName = "WEB^ONE"),
+            rows = 16,
+            columns = 16,
+            outputFile = dicomFile,
+        )
+        return dicomFile
+    }
+
+    @Test
     fun gateway_dicomweb_store_and_qido() {
         val qidoJson = """
             [{"00100020":{"vr":"LO","Value":["G1"]},

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -150,6 +151,10 @@ private fun MainTab.toDestination(): Destination = when (this) {
     MainTab.Settings -> Destination.Settings
 }
 
+/** Runtime permission gating LAN sockets from API 37 (string literal: not in older SDK stubs). */
+private const val ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
+private const val LOCAL_NETWORK_PERMISSION_SDK = 37
+
 @Composable
 fun Phase3App() {
     val context = LocalContext.current
@@ -211,6 +216,25 @@ fun Phase3App() {
 
     LaunchedEffect(pacsSettings.loggingEnabled) {
         diagnosticLog.setEnabled(pacsSettings.loggingEnabled)
+    }
+
+    // targetSdk 37: LAN TCP (DIMSE / MWL / on-prem DICOMweb and EHR) silently times out
+    // without ACCESS_LOCAL_NETWORK. Nearly every PACS is on the local network, so ask up front.
+    val localNetworkPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        diagnosticLog.log("local_network_permission", if (granted) "granted" else "denied")
+        if (!granted) {
+            statusNote = "Local network access denied — PACS and worklist on this network will not respond"
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= LOCAL_NETWORK_PERMISSION_SDK &&
+            ContextCompat.checkSelfPermission(context, ACCESS_LOCAL_NETWORK) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            localNetworkPermission.launch(ACCESS_LOCAL_NETWORK)
+        }
     }
 
     val downloadLogLauncher = rememberLauncherForActivityResult(

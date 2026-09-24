@@ -88,11 +88,16 @@ class DicomWebClient(
 
             http.newCall(request).execute().use { response ->
                 val responseText = response.body?.string().orEmpty()
-                if (response.isSuccessful || response.code == 409) {
+                // PS3.18 STOW-RS: 409 Conflict means no instance was stored, and a 2xx
+                // (typically 202) may still list our instance in FailedSOPSequence.
+                // Either must fail so the caller queues instead of wiping local pixels.
+                if (response.isSuccessful && !hasFailedSop(responseText)) {
                     val sop = extractSopUid(responseText)
                         ?: readSopFromFile(dicomFile)
                         ?: "stow-ok"
                     StoreResult.Success(sop)
+                } else if (response.isSuccessful) {
+                    StoreResult.Failed("STOW-RS HTTP ${response.code}: instance rejected (FailedSOPSequence)")
                 } else {
                     // Omit response body — may include DICOM JSON demographics; failures are
                     // persisted in the pending queue and shown in the UI.
@@ -158,6 +163,23 @@ class DicomWebClient(
                 is String -> first
                 is JSONObject -> first.optString("Alphabetic").ifBlank { null }
                 else -> first?.toString()
+            }
+        }
+
+        /** True when a STOW-RS response carries a non-empty FailedSOPSequence (0008,1198). */
+        private fun hasFailedSop(responseText: String): Boolean {
+            if (responseText.isBlank()) return false
+            return try {
+                val trimmed = responseText.trim()
+                val obj = when {
+                    trimmed.startsWith("{") -> JSONObject(trimmed)
+                    trimmed.startsWith("[") -> JSONArray(trimmed).optJSONObject(0)
+                    else -> null
+                } ?: return false
+                val failed = obj.optJSONObject("00081198")?.optJSONArray("Value")
+                failed != null && failed.length() > 0
+            } catch (_: Exception) {
+                false
             }
         }
 

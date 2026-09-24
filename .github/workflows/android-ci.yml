@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [main, "cursor/**"]
+    branches: [main, "cursor/**", "claude/**"]
   pull_request:
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       - name: Grant gradlew
         run: chmod +x gradlew
       - name: Unit tests
-        run: ./gradlew :dicom:testDebugUnitTest :identity:testDebugUnitTest --stacktrace
+        run: ./gradlew :dicom:testDebugUnitTest :identity:testDebugUnitTest :app:testDevDebugUnitTest --stacktrace
       - name: Assemble debug APKs
         run: ./gradlew :app:assembleDevDebug :app:assembleStagingDebug --stacktrace
       - name: Upload debug APKs
